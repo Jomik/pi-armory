@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
+import { fetchSecret } from "./keychain.js";
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -53,6 +54,16 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
         }
       }
 
+      // Fetch secrets from keychain and prepare extraEnv / redact
+      let extraEnv: Record<string, string> | undefined;
+      let redact: string[] | undefined;
+      if (tool.secrets && Object.keys(tool.secrets).length > 0) {
+        const entries = Object.entries(tool.secrets);
+        const values = await Promise.all(entries.map(([, account]) => fetchSecret(account)));
+        extraEnv = Object.fromEntries(entries.map(([envVar], i) => [envVar, values[i] as string]));
+        redact = values;
+      }
+
       // Execute the command, streaming output
       const output = await executeCommand(command, {
         cwd: ctx.cwd,
@@ -64,6 +75,8 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
                 details: undefined,
               })
           : undefined,
+        extraEnv,
+        redact,
       });
 
       return {

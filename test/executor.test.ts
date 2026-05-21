@@ -38,6 +38,48 @@ describe("executeCommand", () => {
     );
   });
 
+  it("injects extraEnv vars into the subprocess environment", async () => {
+    const result = await executeCommand("echo $ARMORY_TEST_VAR", {
+      cwd: process.cwd(),
+      extraEnv: { ARMORY_TEST_VAR: "injected-value" },
+    });
+    expect(result.trim()).toBe("injected-value");
+  });
+
+  it("does not expose baseline-env-only values when extraEnv not set", async () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable, not JS interpolation
+    const result = await executeCommand("echo ${ARMORY_TEST_VAR:-not-set}", {
+      cwd: process.cwd(),
+    });
+    expect(result.trim()).toBe("not-set");
+  });
+
+  it("redacts specified values from resolved output", async () => {
+    const result = await executeCommand("echo supersecret", {
+      cwd: process.cwd(),
+      redact: ["supersecret"],
+    });
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("supersecret");
+  });
+
+  it("redacts specified values from rejected error message", async () => {
+    await expect(
+      executeCommand("echo supersecret && exit 1", {
+        cwd: process.cwd(),
+        redact: ["supersecret"],
+      }),
+    ).rejects.toThrow(/\[REDACTED\]/);
+  });
+
+  it("does not alter output when redact is empty", async () => {
+    const result = await executeCommand("echo hello", {
+      cwd: process.cwd(),
+      redact: [],
+    });
+    expect(result.trim()).toBe("hello");
+  });
+
   it("calls onUpdate with progressive output", async () => {
     const updates: string[] = [];
     const result = await executeCommand("echo line1 && sleep 0.15 && echo line2", {

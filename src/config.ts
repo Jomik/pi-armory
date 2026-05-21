@@ -45,6 +45,7 @@ export interface ArmoryTool {
   requires_approval?: boolean;
   guidelines?: string[];
   parameters?: Record<string, { type: "string"; description?: string }>;
+  secrets?: Record<string, string>;
 }
 
 async function readToolsFile(filePath: string): Promise<{ tools: ArmoryTool[]; draftModel?: string }> {

@@ -2,11 +2,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
+import { fetchSecret } from "../src/keychain.js";
 import { registerArmoryTool } from "../src/register-tool.js";
 
 vi.mock("../src/executor.js");
+vi.mock("../src/keychain.js");
 
 const mockExecuteCommand = vi.mocked(executeCommand);
+const mockFetchSecret = vi.mocked(fetchSecret);
 
 // Shape of the update object passed to the tool's onUpdate callback
 type ToolUpdate = { content: { type: string; text: string }[]; details: undefined };
@@ -60,6 +63,7 @@ const approvalTool: ArmoryTool = {
 describe("registerArmoryTool", () => {
   beforeEach(() => {
     mockExecuteCommand.mockReset();
+    mockFetchSecret.mockReset();
   });
 
   it("calls pi.registerTool with the correct name and description", () => {
@@ -168,5 +172,79 @@ describe("registerArmoryTool", () => {
 
     const opts = mockExecuteCommand.mock.calls[0][1];
     expect(opts?.onUpdate).toBeUndefined();
+  });
+
+  describe("secrets", () => {
+    const secretTool: ArmoryTool = {
+      name: "secret-tool",
+      command: "deploy",
+      description: "Deploy with secrets",
+      secrets: { API_KEY: "api-key-account", DB_PASS: "db-pass-account" },
+    };
+
+    it("fetches secrets from keychain and passes them as extraEnv", async () => {
+      mockFetchSecret.mockImplementation(async (account) => `value-for-${account}`);
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(secretTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      expect(mockFetchSecret).toHaveBeenCalledWith("api-key-account");
+      expect(mockFetchSecret).toHaveBeenCalledWith("db-pass-account");
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({
+        API_KEY: "value-for-api-key-account",
+        DB_PASS: "value-for-db-pass-account",
+      });
+    });
+
+    it("passes fetched secret values as redact array", async () => {
+      mockFetchSecret.mockImplementation(async (account) => `value-for-${account}`);
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(secretTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.redact).toContain("value-for-api-key-account");
+      expect(opts?.redact).toContain("value-for-db-pass-account");
+    });
+
+    it("does not call fetchSecret when tool has no secrets", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(baseTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      expect(mockFetchSecret).not.toHaveBeenCalled();
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toBeUndefined();
+      expect(opts?.redact).toBeUndefined();
+    });
+
+    it("does not call fetchSecret when secrets is empty object", async () => {
+      const toolWithEmptySecrets: ArmoryTool = {
+        name: "no-secrets-tool",
+        command: "echo hi",
+        description: "No secrets",
+        secrets: {},
+      };
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(toolWithEmptySecrets);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      expect(mockFetchSecret).not.toHaveBeenCalled();
+    });
+
+    it("propagates errors thrown by fetchSecret", async () => {
+      mockFetchSecret.mockRejectedValue(new Error("keychain locked"));
+      const execute = registerAndCapture(secretTool);
+
+      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        "keychain locked",
+      );
+    });
   });
 });

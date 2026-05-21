@@ -4,6 +4,7 @@ import type { ArmoryTool } from "../src/config.js";
 vi.mock("../src/config.js");
 vi.mock("../src/register-tool.js");
 vi.mock("../src/request-tool.js");
+vi.mock("../src/manage-secrets.js");
 
 import { loadConfig } from "../src/config.js";
 import factory from "../src/index.js";

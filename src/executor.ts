@@ -1,18 +1,42 @@
 import { spawn } from "node:child_process";
 
+const BASELINE_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "USER", "SHELL", "TMPDIR"];
+
+function buildEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of BASELINE_ENV_KEYS) {
+    if (process.env[key] != null) {
+      env[key] = process.env[key];
+    }
+  }
+  return env;
+}
+
 export interface ExecuteOptions {
   cwd: string;
   signal?: AbortSignal;
   onUpdate?: (content: string) => void;
+  extraEnv?: Record<string, string>;
+  redact?: string[];
+}
+
+function applyRedaction(text: string, redact?: string[]): string {
+  if (!redact || redact.length === 0) return text;
+  let result = text;
+  for (const secret of redact) {
+    if (!secret) continue;
+    result = result.split(secret).join("[REDACTED]");
+  }
+  return result;
 }
 
 export async function executeCommand(command: string, options: ExecuteOptions): Promise<string> {
-  const { cwd, signal, onUpdate } = options;
+  const { cwd, signal, onUpdate, extraEnv, redact } = options;
 
   return new Promise<string>((resolve, reject) => {
     const proc = spawn("sh", ["-c", command], {
       cwd,
-      env: process.env,
+      env: { ...buildEnv(), ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
@@ -29,7 +53,7 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
         throttleTimer = null;
         if (!settled && output !== lastFlushed) {
           lastFlushed = output;
-          onUpdate(output);
+          onUpdate(applyRedaction(output, redact));
         }
       }, 100);
     }
@@ -41,7 +65,7 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       }
       if (onUpdate && output !== lastFlushed) {
         lastFlushed = output;
-        onUpdate(output);
+        onUpdate(applyRedaction(output, redact));
       }
     }
 
@@ -105,9 +129,9 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
 
       const exitCode = code ?? (killSignal ? 1 : 0);
       if (exitCode === 0) {
-        resolve(output);
+        resolve(applyRedaction(output, redact));
       } else {
-        reject(new Error(`${output}\n\nCommand exited with code ${exitCode}`));
+        reject(new Error(`${applyRedaction(output, redact)}\n\nCommand exited with code ${exitCode}`));
       }
     });
   });
