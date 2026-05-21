@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Editor, Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type ArmoryTool, saveConfig } from "./config.js";
 import type { DraftOutput } from "./draft.js";
@@ -160,8 +160,14 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
                   }
                 }
               } else {
-                const val = truncateToWidth(textEditors[i].getText(), fieldWidth);
-                lines.push(` ${theme.fg("muted", label)} ${theme.fg("text", val)}`);
+                const wrapped = wrapTextWithAnsi(theme.fg("text", textEditors[i].getText()), fieldWidth);
+                for (let j = 0; j < wrapped.length; j++) {
+                  if (j === 0) {
+                    lines.push(` ${theme.fg("muted", label)} ${wrapped[j]}`);
+                  } else {
+                    lines.push(` ${" ".repeat(LABEL)} ${wrapped[j]}`);
+                  }
+                }
               }
             }
 
@@ -172,7 +178,10 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
             if (focus === 3) {
               for (let i = 0; i < guidelines.length; i++) {
                 const prefix = i === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
-                lines.push(` ${prefix} ${theme.fg("text", `- ${guidelines[i]}`)}`);
+                const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
+                for (let j = 0; j < wrapped.length; j++) {
+                  lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
+                }
               }
               const edLines = guidelinesEditor.render(fieldWidth);
               const edMid = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
@@ -189,7 +198,10 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
             } else {
               for (let i = 0; i < guidelines.length; i++) {
                 const prefix = i === 0 ? theme.fg("muted", guidelinesLabel) : " ".repeat(LABEL);
-                lines.push(` ${prefix} ${theme.fg("text", `- ${guidelines[i]}`)}`);
+                const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
+                for (let j = 0; j < wrapped.length; j++) {
+                  lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
+                }
               }
             }
 
@@ -231,7 +243,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
             lines.push(` ${theme.fg("dim", hint)}`);
             lines.push(hr);
 
-            return lines;
+            return lines.map((line) => truncateToWidth(line, width));
           },
 
           handleInput(data: string) {
