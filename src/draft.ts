@@ -23,7 +23,7 @@ Given a command and optional usage context, produce a JSON tool definition.
 
 Rules:
 - name: lowercase with underscores, concise (e.g. "run_tests", "deploy_staging")
-- command: the shell command. Use {{param_name}} placeholders for dynamic values the agent should provide at call time. If the command is already complete with no dynamic parts, leave it as-is.
+- command: the shell command. Use {{param_name}} placeholders for dynamic values the agent should provide at call time. Do NOT quote placeholders — they are automatically shell-escaped. Write \`-m {{message}}\` not \`-m "{{message}}"\`. If the command is already complete with no dynamic parts, leave it as-is.
 - description: one sentence explaining what this tool does (shown to the agent)
 - requires_approval: true if the command is destructive, has side effects, or modifies external state
 - guidelines: array of short behavioral instructions for the agent (when to use, when not to, preconditions). Can be empty array.

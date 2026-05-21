@@ -120,6 +120,36 @@ describe("registerArmoryTool — parameter interpolation", () => {
     expect(mockExecuteCommand).toHaveBeenCalledWith("echo 'foo;rm -rf /'", expect.objectContaining({}));
   });
 
+  it("strips surrounding double quotes from placeholder before escaping", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "describe",
+      command: 'jj describe -m "{{message}}"',
+      description: "Describe a commit",
+      parameters: { message: { type: "string", description: "Commit message" } },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { message: "fix: something" }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("jj describe -m 'fix: something'", expect.objectContaining({}));
+  });
+
+  it("strips surrounding single quotes from placeholder before escaping", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "echo",
+      command: "echo '{{msg}}'",
+      description: "Echo",
+      parameters: { msg: { type: "string", description: "Message" } },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { msg: "hello world" }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("echo 'hello world'", expect.objectContaining({}));
+  });
+
   it("throws when a declared parameter is missing from params", async () => {
     const tool: ArmoryTool = {
       name: "missing-param",

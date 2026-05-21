@@ -8,7 +8,8 @@ function shellEscape(value: string): string {
 }
 
 function interpolateCommand(command: string, params: Record<string, unknown>): string {
-  return command.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+  return command.replace(/(["'])\{\{(\w+)\}\}\1|\{\{(\w+)\}\}/g, (_match, _quote, quotedKey, bareKey) => {
+    const key = quotedKey ?? bareKey;
     if (!(key in params)) {
       throw new Error(`Missing required parameter: ${key}`);
     }
