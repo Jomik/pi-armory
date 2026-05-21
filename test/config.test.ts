@@ -7,11 +7,13 @@ import { loadConfig, saveConfig } from "../src/config.js";
 
 let tmpDir: string;
 let fakeHome: string;
+let fakeAgentDir: string;
 let projectRoot: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), "pi-armory-test-"));
   fakeHome = path.join(tmpDir, "home");
+  fakeAgentDir = path.join(fakeHome, ".pi", "agent");
   projectRoot = path.join(tmpDir, "project");
   await mkdir(fakeHome, { recursive: true });
   await mkdir(projectRoot, { recursive: true });
@@ -31,9 +33,8 @@ const toolAOverride: ArmoryTool = {
 };
 
 async function writeGlobal(tools: ArmoryTool[]) {
-  const dir = path.join(fakeHome, ".pi", "agent");
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "armory.json"), `${JSON.stringify({ tools }, null, 2)}\n`);
+  await mkdir(fakeAgentDir, { recursive: true });
+  await writeFile(path.join(fakeAgentDir, "armory.json"), `${JSON.stringify({ tools }, null, 2)}\n`);
 }
 
 async function writeProject(tools: ArmoryTool[]) {
@@ -44,71 +45,96 @@ async function writeProject(tools: ArmoryTool[]) {
 
 describe("loadConfig", () => {
   it("returns [] when no files exist", async () => {
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toEqual([]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
   });
 
   it("returns global tools when only global file exists", async () => {
     await writeGlobal([toolA, toolB]);
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toEqual([toolA, toolB]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([toolA, toolB]);
   });
 
   it("returns project tools when only project file exists", async () => {
     await writeProject([toolA]);
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toEqual([toolA]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([toolA]);
   });
 
   it("merges global and project tools, project overrides by name", async () => {
     await writeGlobal([toolA, toolB]);
     await writeProject([toolAOverride]);
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toHaveLength(2);
-    expect(result.find((t) => t.name === "tool-a")).toEqual(toolAOverride);
-    expect(result.find((t) => t.name === "tool-b")).toEqual(toolB);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toHaveLength(2);
+    expect(result.tools.find((t) => t.name === "tool-a")).toEqual(toolAOverride);
+    expect(result.tools.find((t) => t.name === "tool-b")).toEqual(toolB);
   });
 
   it("returns [] and does not throw on invalid global JSON", async () => {
-    const dir = path.join(fakeHome, ".pi", "agent");
-    await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, "armory.json"), "not-valid-json");
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toEqual([]);
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(path.join(fakeAgentDir, "armory.json"), "not-valid-json");
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
   });
 
   it("returns [] and does not throw on invalid project JSON", async () => {
     const dir = path.join(projectRoot, ".pi");
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "armory.json"), "{bad json");
-    const result = await loadConfig(projectRoot, fakeHome);
-    expect(result).toEqual([]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("returns draftModel from global config", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      `${JSON.stringify({ tools: [], draftModel: "fast-model" }, null, 2)}\n`,
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.draftModel).toBe("fast-model");
+  });
+
+  it("project draftModel overrides global draftModel", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      `${JSON.stringify({ tools: [], draftModel: "global-model" }, null, 2)}\n`,
+    );
+    const projectDir = path.join(projectRoot, ".pi");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      path.join(projectDir, "armory.json"),
+      `${JSON.stringify({ tools: [], draftModel: "project-model" }, null, 2)}\n`,
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.draftModel).toBe("project-model");
   });
 });
 
 describe("saveConfig", () => {
   it("creates project file if it does not exist", async () => {
-    await saveConfig(toolA, "project", projectRoot, fakeHome);
+    await saveConfig(toolA, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
     expect(JSON.parse(content)).toEqual({ tools: [toolA] });
   });
 
   it("creates global file if it does not exist", async () => {
-    await saveConfig(toolA, "global", projectRoot, fakeHome);
-    const content = await readFile(path.join(fakeHome, ".pi", "agent", "armory.json"), "utf-8");
+    await saveConfig(toolA, "global", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(fakeAgentDir, "armory.json"), "utf-8");
     expect(JSON.parse(content)).toEqual({ tools: [toolA] });
   });
 
   it("appends new tool to existing project file", async () => {
     await writeProject([toolA]);
-    await saveConfig(toolB, "project", projectRoot, fakeHome);
+    await saveConfig(toolB, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
     expect(JSON.parse(content)).toEqual({ tools: [toolA, toolB] });
   });
 
   it("replaces existing tool by name in project file", async () => {
     await writeProject([toolA, toolB]);
-    await saveConfig(toolAOverride, "project", projectRoot, fakeHome);
+    await saveConfig(toolAOverride, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
     const parsed = (JSON.parse(content) as { tools: ArmoryTool[] }).tools;
     expect(parsed).toHaveLength(2);
@@ -116,8 +142,24 @@ describe("saveConfig", () => {
     expect(parsed.find((t) => t.name === "tool-b")).toEqual(toolB);
   });
 
+  it("preserves draftModel when saving a tool to existing config", async () => {
+    const dir = path.join(projectRoot, ".pi");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "armory.json"),
+      `${JSON.stringify({ tools: [toolA], draftModel: "anthropic:claude-haiku-4.5" }, null, 2)}\n`,
+    );
+
+    await saveConfig(toolB, "project", projectRoot, fakeAgentDir);
+
+    const content = await readFile(path.join(dir, "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[]; draftModel?: string };
+    expect(parsed.draftModel).toBe("anthropic:claude-haiku-4.5");
+    expect(parsed.tools).toHaveLength(2);
+  });
+
   it("writes pretty-printed JSON with trailing newline", async () => {
-    await saveConfig(toolA, "project", projectRoot, fakeHome);
+    await saveConfig(toolA, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
     expect(content.endsWith("\n")).toBe(true);
     expect(content).toBe(`${JSON.stringify({ tools: [toolA] }, null, 2)}\n`);

@@ -1,12 +1,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: unknown }).code === "ENOENT";
 }
 
-function parseToolsJson(content: string, filePath: string, onInvalid: string): ArmoryTool[] | null {
+function parseToolsJson(
+  content: string,
+  filePath: string,
+  onInvalid: string,
+): { tools: ArmoryTool[]; draftModel?: string } | null {
   try {
     const parsed = JSON.parse(content) as unknown;
     if (
@@ -15,7 +19,11 @@ function parseToolsJson(content: string, filePath: string, onInvalid: string): A
       !Array.isArray(parsed) &&
       Array.isArray((parsed as ArmoryConfig).tools)
     ) {
-      return (parsed as ArmoryConfig).tools;
+      const cfg = parsed as ArmoryConfig;
+      return {
+        tools: cfg.tools,
+        ...(cfg.draftModel !== undefined ? { draftModel: cfg.draftModel } : {}),
+      };
     }
     console.warn(`pi-armory: invalid config in ${filePath}, ${onInvalid}`);
     return null;
@@ -26,6 +34,7 @@ function parseToolsJson(content: string, filePath: string, onInvalid: string): A
 }
 
 interface ArmoryConfig {
+  draftModel?: string;
   tools: ArmoryTool[];
 }
 
@@ -35,55 +44,67 @@ export interface ArmoryTool {
   description: string;
   requires_approval?: boolean;
   guidelines?: string[];
+  parameters?: Record<string, { type: "string"; description?: string }>;
 }
 
-async function readToolsFile(filePath: string): Promise<ArmoryTool[]> {
+async function readToolsFile(filePath: string): Promise<{ tools: ArmoryTool[]; draftModel?: string }> {
   let content: string;
   try {
     content = await readFile(filePath, "utf-8");
   } catch (err: unknown) {
     if (isEnoent(err)) {
-      return [];
+      return { tools: [] };
     }
     throw err;
   }
 
-  return parseToolsJson(content, filePath, "ignoring") ?? [];
+  return parseToolsJson(content, filePath, "ignoring") ?? { tools: [] };
 }
 
-export async function loadConfig(projectRoot: string, homedir: string = os.homedir()): Promise<ArmoryTool[]> {
-  const globalPath = path.join(homedir, ".pi", "agent", "armory.json");
+export async function loadConfig(
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<{ tools: ArmoryTool[]; draftModel?: string }> {
+  const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
-  const [globalTools, projectTools] = await Promise.all([readToolsFile(globalPath), readToolsFile(projectPath)]);
+  const [globalResult, projectResult] = await Promise.all([readToolsFile(globalPath), readToolsFile(projectPath)]);
 
   const merged = new Map<string, ArmoryTool>();
-  for (const tool of globalTools) {
+  for (const tool of globalResult.tools) {
     merged.set(tool.name, tool);
   }
-  for (const tool of projectTools) {
+  for (const tool of projectResult.tools) {
     merged.set(tool.name, tool);
   }
 
-  return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const draftModel = projectResult.draftModel ?? globalResult.draftModel;
+
+  return {
+    tools: Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    ...(draftModel !== undefined ? { draftModel } : {}),
+  };
 }
 
 export async function saveConfig(
   tool: ArmoryTool,
   destination: "project" | "global",
   projectRoot: string,
-  homedir: string = os.homedir(),
+  agentDir: string = getAgentDir(),
 ): Promise<void> {
   const filePath =
-    destination === "project"
-      ? path.join(projectRoot, ".pi", "armory.json")
-      : path.join(homedir, ".pi", "agent", "armory.json");
+    destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(agentDir, "armory.json");
 
   let tools: ArmoryTool[];
 
+  let rest: Omit<ArmoryConfig, "tools"> = {};
+
   try {
     const content = await readFile(filePath, "utf-8");
-    tools = parseToolsJson(content, filePath, "overwriting") ?? [];
+    const existing = parseToolsJson(content, filePath, "overwriting");
+    tools = existing?.tools ?? [];
+    const { tools: _discarded, ...parsedRest } = existing ?? {};
+    rest = parsedRest;
   } catch (err: unknown) {
     if (isEnoent(err)) {
       await mkdir(path.dirname(filePath), { recursive: true });
@@ -100,5 +121,5 @@ export async function saveConfig(
     tools.push(tool);
   }
 
-  await writeFile(filePath, `${JSON.stringify({ tools }, null, 2)}\n`, "utf-8");
+  await writeFile(filePath, `${JSON.stringify({ ...rest, tools }, null, 2)}\n`, "utf-8");
 }

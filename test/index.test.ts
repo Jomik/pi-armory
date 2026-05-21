@@ -18,7 +18,7 @@ const fakePi = {} as Parameters<typeof factory>[0];
 
 describe("factory", () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue([]);
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined });
   });
 
   afterEach(() => {
@@ -26,7 +26,7 @@ describe("factory", () => {
   });
 
   it("registers each tool from config via registerArmoryTool", async () => {
-    vi.mocked(loadConfig).mockResolvedValue([toolA, toolB]);
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [toolA, toolB], draftModel: undefined });
 
     await factory(fakePi);
 
@@ -35,15 +35,23 @@ describe("factory", () => {
     expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, toolB);
   });
 
-  it("registers request_tool with pi and projectRoot", async () => {
+  it("registers request_tool with pi, projectRoot, and draftModel", async () => {
     await factory(fakePi);
 
     expect(registerRequestTool).toHaveBeenCalledTimes(1);
-    expect(registerRequestTool).toHaveBeenCalledWith(fakePi, process.cwd());
+    expect(registerRequestTool).toHaveBeenCalledWith(fakePi, process.cwd(), undefined);
+  });
+
+  it("passes draftModel from config to registerRequestTool", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: "fast-model" });
+
+    await factory(fakePi);
+
+    expect(registerRequestTool).toHaveBeenCalledWith(fakePi, process.cwd(), "fast-model");
   });
 
   it("registers no armory tools when config is empty, but still registers request_tool", async () => {
-    vi.mocked(loadConfig).mockResolvedValue([]);
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined });
 
     await factory(fakePi);
 

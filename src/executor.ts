@@ -63,7 +63,15 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
     if (signal) {
       if (signal.aborted) {
         settled = true;
-        proc.kill();
+        if (process.platform !== "win32" && proc.pid) {
+          try {
+            process.kill(-proc.pid, "SIGTERM");
+          } catch {
+            proc.kill();
+          }
+        } else {
+          proc.kill();
+        }
         reject(new Error("Command aborted"));
         return;
       }
@@ -72,7 +80,15 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
         () => {
           if (settled) return;
           settled = true;
-          proc.kill();
+          if (process.platform !== "win32" && proc.pid) {
+            try {
+              process.kill(-proc.pid, "SIGTERM");
+            } catch {
+              proc.kill();
+            }
+          } else {
+            proc.kill();
+          }
           reject(new Error("Command aborted"));
         },
         { once: true },

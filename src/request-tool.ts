@@ -1,7 +1,10 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Editor, Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type ArmoryTool, saveConfig } from "./config.js";
+import type { DraftOutput } from "./draft.js";
+import { draftToolDefinition } from "./draft.js";
 import { registerArmoryTool } from "./register-tool.js";
 
 interface RequestToolResult {
@@ -16,6 +19,11 @@ interface RequestToolResult {
 const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
 
+export function extractPlaceholders(command: string): string[] {
+  const matches = command.matchAll(/\{\{(\w+)\}\}/g);
+  return [...new Set([...matches].map((m) => m[1]))];
+}
+
 export function normalizeName(name: string): string {
   return name
     .trim()
@@ -25,23 +33,19 @@ export function normalizeName(name: string): string {
     .replace(/^[0-9_]+/, "");
 }
 
-export function registerRequestTool(pi: ExtensionAPI, projectRoot: string): void {
+export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draftModelName?: string): void {
   pi.registerTool({
     name: "request_tool",
     label: "Request Tool",
     description:
       "Request a new armory tool to be registered. Presents a form for the user to review, edit, and approve the proposed tool before it is added to the armory.",
-    promptSnippet: "request_tool: propose a new named shell-command tool for approval",
+    promptSnippet:
+      "request_tool: propose a shell command to be registered as a reusable tool. A model will draft the full tool definition for human review.",
     parameters: Type.Object({
-      name: Type.String({ description: "Tool name (lowercase, underscores)" }),
-      command: Type.String({ description: "Shell command to execute" }),
-      description: Type.String({ description: "What this tool does (shown to LLM)" }),
-      requires_approval: Type.Optional(Type.Boolean({ description: "Require human approval before each execution" })),
-      guidelines: Type.Optional(
-        Type.Array(Type.String(), { description: "Usage guidelines for the agent (behavioral instructions)" }),
-      ),
+      command: Type.String({ description: "Shell command to run (or approximate command)" }),
+      usage: Type.Optional(Type.String({ description: "Why this tool is needed / when to use it" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (!ctx.hasUI) {
         return {
           content: [{ type: "text", text: "request_tool requires interactive mode" }],
@@ -49,11 +53,42 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string): void
         };
       }
 
+      // Resolve draft model: prefer configured "provider:modelId", fall back to session model
+      let draftModel: Model<Api> | undefined;
+      if (draftModelName) {
+        const colonIdx = draftModelName.indexOf(":");
+        if (colonIdx > 0) {
+          const provider = draftModelName.slice(0, colonIdx);
+          const modelId = draftModelName.slice(colonIdx + 1);
+          draftModel = ctx.modelRegistry.find(provider, modelId);
+        }
+      }
+      if (!draftModel) {
+        draftModel = ctx.model as Model<Api> | undefined;
+      }
+
+      let drafted: DraftOutput | undefined;
+      if (draftModel) {
+        const auth = await ctx.modelRegistry.getApiKeyAndHeaders(draftModel);
+        if (auth.ok) {
+          try {
+            drafted = await draftToolDefinition(
+              draftModel,
+              { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
+              { command: params.command, usage: params.usage },
+              signal,
+            );
+          } catch {
+            // Draft failed — continue with raw input
+          }
+        }
+      }
+
       const result = await ctx.ui.custom<RequestToolResult | null>((tui, theme, _keybindings, done) => {
         let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination
-        let requiresApproval = params.requires_approval ?? false;
+        let requiresApproval = drafted?.requires_approval ?? false;
         let destination: "project" | "global" = "project";
-        let guidelines: string[] = params.guidelines?.slice() ?? [];
+        let guidelines: string[] = drafted?.guidelines ?? [];
 
         const editorTheme = {
           borderColor: (s: string) => theme.fg("border", s),
@@ -71,9 +106,9 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string): void
         const descEditor = new Editor(tui, editorTheme);
         const guidelinesEditor = new Editor(tui, editorTheme);
 
-        nameEditor.setText(params.name);
-        commandEditor.setText(params.command);
-        descEditor.setText(params.description);
+        nameEditor.setText(drafted?.name ?? "");
+        commandEditor.setText(drafted?.command ?? params.command);
+        descEditor.setText(drafted?.description ?? params.usage ?? "");
 
         const textEditors = [nameEditor, commandEditor, descEditor];
 
@@ -157,6 +192,14 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string): void
                 lines.push(` ${prefix} ${theme.fg("text", `- ${guidelines[i]}`)}`);
               }
             }
+
+            lines.push("");
+
+            // Parameters (read-only, auto-detected)
+            const paramsLabel = "Parameters:".padEnd(LABEL);
+            const placeholders = extractPlaceholders(commandEditor.getText());
+            const paramsText = placeholders.length > 0 ? placeholders.join(", ") : "(none)";
+            lines.push(` ${theme.fg("muted", paramsLabel)} ${theme.fg("dim", paramsText)}`);
 
             lines.push("");
 
@@ -296,12 +339,23 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string): void
         };
       }
 
+      const placeholders = extractPlaceholders(result.command);
       const tool: ArmoryTool = {
         name,
         command: result.command,
         description: result.description,
         ...(result.requiresApproval ? { requires_approval: true } : {}),
         ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
+        ...(placeholders.length > 0
+          ? {
+              parameters: Object.fromEntries(
+                placeholders.map((p) => [
+                  p,
+                  { type: "string" as const, description: drafted?.parameters[p]?.description },
+                ]),
+              ),
+            }
+          : {}),
       };
 
       await saveConfig(tool, result.destination, projectRoot);

@@ -24,7 +24,7 @@ pi -e npm:pi-armory
 
 ## How it works
 
-pi-armory provides a fixed set of named command tools. Each tool runs a pre-defined shell command — no parameters, no shell access through these tools.
+pi-armory provides a fixed set of named command tools. Each tool runs a shell command with optional `{{parameter}}` placeholders — values are shell-escaped before interpolation.
 
 ### Config
 
@@ -44,6 +44,23 @@ Tools are defined in `.pi/armory.json` (project-local) or `~/.pi/agent/armory.js
   ]
 }
 ```
+
+### Parameters
+
+Declare named parameters in the tool config; use `{{paramName}}` in the command string:
+
+```json
+{
+  "name": "test_file",
+  "command": "npm test -- {{file}}",
+  "description": "Run tests for a specific file",
+  "parameters": {
+    "file": { "type": "string", "description": "Path to the test file" }
+  }
+}
+```
+
+All declared parameters are required. Values are shell-escaped before substitution.
 
 ### Bootstrapping
 

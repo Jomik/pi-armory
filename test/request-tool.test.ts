@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { normalizeName, VALID_NAME } from "../src/request-tool.js";
+import { extractPlaceholders, normalizeName, VALID_NAME } from "../src/request-tool.js";
+
+describe("extractPlaceholders", () => {
+  it("returns empty array for a command with no placeholders", () => {
+    expect(extractPlaceholders("echo hello")).toEqual([]);
+  });
+
+  it("extracts a single placeholder", () => {
+    expect(extractPlaceholders("cat {{file}}")).toEqual(["file"]);
+  });
+
+  it("extracts multiple distinct placeholders", () => {
+    expect(extractPlaceholders("deploy {{file}} to {{env}}")).toEqual(["file", "env"]);
+  });
+
+  it("deduplicates repeated placeholders", () => {
+    expect(extractPlaceholders("cp {{file}} {{file}}")).toEqual(["file"]);
+  });
+
+  it("still extracts inner word from nested/malformed triple braces", () => {
+    expect(extractPlaceholders("{{{foo}}}")).toEqual(["foo"]);
+  });
+});
 
 describe("normalizeName", () => {
   it("returns an already-valid name unchanged", () => {

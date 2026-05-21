@@ -2,7 +2,7 @@
 
 ## Core Design
 
-- Tools are fixed commands with no parameters
+- Tools are shell commands with optional `{{param}}` template parameters
 - Stored in `.pi/armory.json` (project) or `~/.pi/agent/armory.json` (global)
 - Agent requests new tools via `request_tool` — human reviews and approves
 - `requires_approval: true` prompts human yes/no before each execution
@@ -28,7 +28,7 @@
 
 ## Key decisions
 
-- No parameters (commands are fixed strings)
+- Commands support `{{paramName}}` template placeholders; parameters are declared in the tool config and shell-escaped before interpolation
 - Separate config file (not in pi settings.json), consistent with pi-imps/pi-errands/pi-inquisitor
 - `checks` is just another tool in the armory (e.g. `{ "name": "checks", "command": "npm test && npm run typecheck" }`)
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
@@ -40,7 +40,10 @@
 - Project tools override global tools with the same name
 - If no config exists, no tools are registered — but `request_tool` is always available so the agent can bootstrap
 
-## `request_tool` flow
+## Parameters
+
+Tools can declare named parameters with `parameters: Record<string, { type: "string"; description: string }>`. The command string uses `{{paramName}}` placeholders. At execution time, each placeholder is replaced with the shell-escaped value (`'value'`, with internal single quotes escaped as `'\''`). All declared parameters are required — missing parameters throw an error. This approach prevents injection by containing every value in single quotes regardless of its content.
+
 
 1. Agent calls `request_tool` with a proposed `{ name, command, description, requires_approval?, guidelines? }`
 2. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
