@@ -6,14 +6,19 @@ import { registerRequestTool } from "./request-tool.js";
 
 const factory: ExtensionFactory = async (pi) => {
   const projectRoot = process.cwd();
-  const { tools, draftModel } = await loadConfig(projectRoot);
+  const { tools, draftModel, disableBash } = await loadConfig(projectRoot);
+
+  if (disableBash) {
+    const active = pi.getActiveTools().filter((name) => name !== "bash");
+    pi.setActiveTools(active);
+  }
 
   for (const tool of tools) {
     registerArmoryTool(pi, tool);
   }
 
   registerRequestTool(pi, projectRoot, draftModel);
-  registerArmoryCommand(pi);
+  registerArmoryCommand(pi, tools);
 };
 
 export default factory;

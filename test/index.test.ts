@@ -15,11 +15,14 @@ const toolA: ArmoryTool = { name: "tool-a", command: "echo a", description: "Too
 const toolB: ArmoryTool = { name: "tool-b", command: "echo b", description: "Tool B" };
 
 // Minimal fake pi context — factory only passes it through to register functions
-const fakePi = {} as Parameters<typeof factory>[0];
+const fakePi = {
+  getActiveTools: () => ["bash", "read", "write", "edit"],
+  setActiveTools: vi.fn(),
+} as unknown as Parameters<typeof factory>[0];
 
 describe("factory", () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined });
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: true });
   });
 
   afterEach(() => {
@@ -27,7 +30,7 @@ describe("factory", () => {
   });
 
   it("registers each tool from config via registerArmoryTool", async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ tools: [toolA, toolB], draftModel: undefined });
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [toolA, toolB], draftModel: undefined, disableBash: true });
 
     await factory(fakePi);
 
@@ -44,7 +47,7 @@ describe("factory", () => {
   });
 
   it("passes draftModel from config to registerRequestTool", async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: "fast-model" });
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: "fast-model", disableBash: true });
 
     await factory(fakePi);
 
@@ -52,7 +55,7 @@ describe("factory", () => {
   });
 
   it("registers no armory tools when config is empty, but still registers request_tool", async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined });
+    vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: true });
 
     await factory(fakePi);
 

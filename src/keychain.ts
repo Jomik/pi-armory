@@ -24,29 +24,25 @@ export async function fetchSecret(account: string): Promise<string> {
 }
 
 /**
- * Lists all account names stored under service "pi-armory" in the keychain.
- * @returns Array of account names
+ * Lists secret account names by probing the keychain for each known account.
+ * Returns only accounts that actually exist in the keychain.
  */
-export async function listSecrets(): Promise<string[]> {
-  try {
-    const { stdout } = await execFile("security", ["dump-keychain"]);
+export async function listSecrets(accounts: string[]): Promise<{ found: string[]; missing: string[] }> {
+  const found: string[] = [];
+  const missing: string[] = [];
 
-    // dump-keychain output: blocks separated by "keychain:" lines.
-    // Each block has "svce"<blob>="..." and "acct"<blob>="..." attributes.
-    const accounts: string[] = [];
-    const blocks = stdout.split(/(?=keychain:)/);
-    for (const block of blocks) {
-      if (!block.includes(`"svce"<blob>="${SERVICE}"`)) continue;
-      const match = block.match(/"acct"<blob>="([^"]+)"/);
-      if (match) {
-        accounts.push(match[1]);
+  await Promise.all(
+    accounts.map(async (account) => {
+      try {
+        await execFile("security", ["find-generic-password", "-s", SERVICE, "-a", account]);
+        found.push(account);
+      } catch {
+        missing.push(account);
       }
-    }
-    return accounts;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`pi-armory: failed to list secrets: ${msg}`);
-  }
+    }),
+  );
+
+  return { found: found.sort(), missing: missing.sort() };
 }
 
 /**

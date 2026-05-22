@@ -10,7 +10,7 @@ function parseToolsJson(
   content: string,
   filePath: string,
   onInvalid: string,
-): { tools: ArmoryTool[]; draftModel?: string } | null {
+): { tools: ArmoryTool[]; draftModel?: string; disableBash?: boolean } | null {
   try {
     const parsed = JSON.parse(content) as unknown;
     if (
@@ -23,6 +23,7 @@ function parseToolsJson(
       return {
         tools: cfg.tools,
         ...(cfg.draftModel !== undefined ? { draftModel: cfg.draftModel } : {}),
+        ...(cfg.disableBash !== undefined ? { disableBash: cfg.disableBash } : {}),
       };
     }
     console.warn(`pi-armory: invalid config in ${filePath}, ${onInvalid}`);
@@ -35,6 +36,7 @@ function parseToolsJson(
 
 interface ArmoryConfig {
   draftModel?: string;
+  disableBash?: boolean;
   tools: ArmoryTool[];
 }
 
@@ -48,7 +50,9 @@ export interface ArmoryTool {
   secrets?: Record<string, string>;
 }
 
-async function readToolsFile(filePath: string): Promise<{ tools: ArmoryTool[]; draftModel?: string }> {
+async function readToolsFile(
+  filePath: string,
+): Promise<{ tools: ArmoryTool[]; draftModel?: string; disableBash?: boolean }> {
   let content: string;
   try {
     content = await readFile(filePath, "utf-8");
@@ -65,7 +69,7 @@ async function readToolsFile(filePath: string): Promise<{ tools: ArmoryTool[]; d
 export async function loadConfig(
   projectRoot: string,
   agentDir: string = getAgentDir(),
-): Promise<{ tools: ArmoryTool[]; draftModel?: string }> {
+): Promise<{ tools: ArmoryTool[]; draftModel?: string; disableBash: boolean }> {
   const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
@@ -80,10 +84,12 @@ export async function loadConfig(
   }
 
   const draftModel = projectResult.draftModel ?? globalResult.draftModel;
+  const disableBash = globalResult.disableBash ?? true;
 
   return {
     tools: Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)),
     ...(draftModel !== undefined ? { draftModel } : {}),
+    disableBash,
   };
 }
 

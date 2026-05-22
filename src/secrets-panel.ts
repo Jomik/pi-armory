@@ -3,19 +3,21 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { addSecret, listSecrets, removeSecret } from "./keychain.js";
 
-type Mode = "list" | "confirm-delete" | "input-name" | "input-value";
+type Mode = "list" | "confirm-delete" | "input-value";
 
 export interface SecretsPanelOptions {
   tui: TUI;
   theme: Theme;
   done: (result: null) => void;
   notify: (message: string, type: "info") => void;
+  accounts: string[];
 }
 
 export class SecretsPanel implements Component {
   private mode: Mode = "list";
   private cursor = 0;
-  private names: string[] = [];
+  private accounts: string[] = [];
+  private found = new Set<string>();
   private loading = true;
   private inputBuffer = "";
   private targetName = "";
@@ -30,9 +32,15 @@ export class SecretsPanel implements Component {
     this.theme = options.theme;
     this.done = options.done;
     this.notify = options.notify;
+    this.accounts = options.accounts;
 
-    void listSecrets().then((names) => {
-      this.names = names;
+    this.refresh();
+  }
+
+  private refresh(): void {
+    this.loading = true;
+    void listSecrets(this.accounts).then(({ found }) => {
+      this.found = new Set(found);
       this.loading = false;
       this.tui.requestRender();
     });
@@ -64,9 +72,6 @@ export class SecretsPanel implements Component {
       case "confirm-delete":
         this.renderConfirmDelete(lines, w, border);
         break;
-      case "input-name":
-        this.renderInputName(lines, w, border);
-        break;
       case "input-value":
         this.renderInputValue(lines, w, border);
         break;
@@ -83,13 +88,15 @@ export class SecretsPanel implements Component {
     const { theme } = this;
     if (this.loading) {
       lines.push(`${border}${this.pad(`  ${theme.fg("muted", "Loading...")}`, w)}${border}`);
-    } else if (this.names.length === 0) {
-      lines.push(`${border}${this.pad(`  ${theme.fg("muted", "(no secrets stored)")}`, w)}${border}`);
+    } else if (this.accounts.length === 0) {
+      lines.push(`${border}${this.pad(`  ${theme.fg("muted", "(no secrets configured)")}`, w)}${border}`);
     } else {
-      for (let i = 0; i < this.names.length; i++) {
+      for (let i = 0; i < this.accounts.length; i++) {
+        const name = this.accounts[i] ?? "";
+        const status = this.found.has(name) ? theme.fg("success", "✓") : theme.fg("error", "✗");
         const prefix = i === this.cursor ? theme.fg("accent", "❯") : " ";
-        const text = i === this.cursor ? theme.fg("accent", this.names[i] ?? "") : (this.names[i] ?? "");
-        lines.push(`${border}${this.pad(`  ${prefix} ${text}`, w)}${border}`);
+        const text = i === this.cursor ? theme.fg("accent", name) : name;
+        lines.push(`${border}${this.pad(`  ${prefix} ${status} ${text}`, w)}${border}`);
       }
     }
   }
@@ -97,16 +104,6 @@ export class SecretsPanel implements Component {
   private renderConfirmDelete(lines: string[], w: number, border: string): void {
     const { theme } = this;
     lines.push(`${border}${this.pad(`  ${theme.fg("accent", `Delete '${this.targetName}'?`)}`, w)}${border}`);
-  }
-
-  private renderInputName(lines: string[], w: number, border: string): void {
-    const { theme } = this;
-    const prefix = `  ${theme.fg("accent", "Name:")} `;
-    const prefixLen = 9; // "  Name: " + cursor block
-    const maxVisible = Math.max(1, w - prefixLen);
-    const buf = this.inputBuffer;
-    const visible = buf.length > maxVisible ? buf.slice(buf.length - maxVisible) : buf;
-    lines.push(`${border}${this.pad(`${prefix}${visible}█`, w)}${border}`);
   }
 
   private renderInputValue(lines: string[], w: number, border: string): void {
@@ -124,10 +121,9 @@ export class SecretsPanel implements Component {
     const { theme } = this;
     switch (this.mode) {
       case "list":
-        return theme.fg("dim", "a add  d delete  u update  Esc close");
+        return theme.fg("dim", "s set  d delete  Esc close");
       case "confirm-delete":
         return theme.fg("dim", "y confirm  n/Esc cancel");
-      case "input-name":
       case "input-value":
         return theme.fg("dim", "Enter confirm  Esc cancel");
     }
@@ -141,29 +137,22 @@ export class SecretsPanel implements Component {
       case "confirm-delete":
         this.handleConfirmDeleteInput(data);
         break;
-      case "input-name":
-        this.handleTextInput(data, () => {
-          const name = this.inputBuffer.trim();
-          if (name) {
-            this.targetName = name;
-            this.inputBuffer = "";
-            this.mode = "input-value";
-            this.tui.requestRender();
-          }
-        });
-        break;
       case "input-value":
         this.handleTextInput(data, () => {
           const value = this.inputBuffer.trim();
           if (value) {
             const name = this.targetName;
             void addSecret(name, value)
-              .then(() => listSecrets())
-              .then((names) => {
-                this.names = names;
+              .then(() => {
                 this.inputBuffer = "";
                 this.mode = "list";
                 this.notify(`Secret '${name}' saved.`, "info");
+                this.refresh();
+              })
+              .catch(() => {
+                this.mode = "list";
+                this.inputBuffer = "";
+                this.notify(`Failed to save secret '${name}'.`, "info");
                 this.tui.requestRender();
               });
           }
@@ -180,34 +169,27 @@ export class SecretsPanel implements Component {
       return;
     }
     if (matchesKey(data, "up") || matchesKey(data, "k")) {
-      if (this.names.length > 0) {
-        this.cursor = (this.cursor - 1 + this.names.length) % this.names.length;
+      if (this.accounts.length > 0) {
+        this.cursor = (this.cursor - 1 + this.accounts.length) % this.accounts.length;
         this.tui.requestRender();
       }
       return;
     }
     if (matchesKey(data, "down") || matchesKey(data, "j")) {
-      if (this.names.length > 0) {
-        this.cursor = (this.cursor + 1) % this.names.length;
+      if (this.accounts.length > 0) {
+        this.cursor = (this.cursor + 1) % this.accounts.length;
         this.tui.requestRender();
       }
       return;
     }
-    if (matchesKey(data, "a")) {
-      this.inputBuffer = "";
-      this.targetName = "";
-      this.mode = "input-name";
-      this.tui.requestRender();
-      return;
-    }
-    if (matchesKey(data, "d") && this.names.length > 0) {
-      this.targetName = this.names[this.cursor] ?? "";
+    if (matchesKey(data, "d") && this.accounts.length > 0) {
+      this.targetName = this.accounts[this.cursor] ?? "";
       this.mode = "confirm-delete";
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "u") && this.names.length > 0) {
-      this.targetName = this.names[this.cursor] ?? "";
+    if (matchesKey(data, "s") && this.accounts.length > 0) {
+      this.targetName = this.accounts[this.cursor] ?? "";
       this.inputBuffer = "";
       this.mode = "input-value";
       this.tui.requestRender();
@@ -224,18 +206,21 @@ export class SecretsPanel implements Component {
     if (matchesKey(data, "y")) {
       const name = this.targetName;
       void removeSecret(name)
-        .then(() => listSecrets())
-        .then((names) => {
-          this.names = names;
-          this.cursor = Math.min(this.cursor, Math.max(0, this.names.length - 1));
+        .then(() => {
+          this.cursor = Math.min(this.cursor, Math.max(0, this.accounts.length - 1));
           this.mode = "list";
           this.notify(`Secret '${name}' deleted.`, "info");
+          this.refresh();
+        })
+        .catch(() => {
+          this.mode = "list";
+          this.notify(`Failed to delete secret '${name}'.`, "info");
           this.tui.requestRender();
         });
     }
   }
 
-  /** Shared text-input handler for input-name and input-value modes. */
+  /** Shared text-input handler for input-value mode. */
   private handleTextInput(data: string, onEnter: () => void): void {
     if (matchesKey(data, "escape")) {
       this.mode = "list";

@@ -51,12 +51,12 @@ describe("fetchSecret", () => {
 
   it("throws a descriptive error when the item is not found", async () => {
     mockReject(new Error("SecKeychainSearchCopyNext: The specified item could not be found."));
-    await expect(fetchSecret("missing-account")).rejects.toThrow(/failed to fetch secret 'missing-account'/);
+    await expect(fetchSecret("missing-account")).rejects.toThrow(/not found in keychain/);
   });
 
   it("throws a descriptive error when the keychain is locked", async () => {
-    mockReject(new Error("SecKeychainOpen: A keychain with the specified name could not be found."));
-    await expect(fetchSecret("any-account")).rejects.toThrow(/failed to fetch secret 'any-account'/);
+    mockReject(new Error("User interaction is not allowed."));
+    await expect(fetchSecret("any-account")).rejects.toThrow(/Failed to read secret/);
   });
 });
 
@@ -65,62 +65,58 @@ describe("listSecrets", () => {
     mockExecFile.mockReset();
   });
 
-  it("calls security dump-keychain", async () => {
+  it("probes each account with find-generic-password", async () => {
     mockResolve(ok(""));
-    await listSecrets();
-    expect(mockExecFile).toHaveBeenCalledWith("security", ["dump-keychain"], expect.any(Function));
+    await listSecrets(["account-one", "account-two"]);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "security",
+      ["find-generic-password", "-s", "pi-armory", "-a", "account-one"],
+      expect.any(Function),
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "security",
+      ["find-generic-password", "-s", "pi-armory", "-a", "account-two"],
+      expect.any(Function),
+    );
   });
 
-  it("returns account names matching service pi-armory", async () => {
-    const dumpOutput = [
-      'keychain: "/test.keychain"',
-      "version: 512",
-      'class: "genp"',
-      "attributes:",
-      '    0x00000007 <blob>="pi-armory"',
-      '    "acct"<blob>="account-one"',
-      '    "svce"<blob>="pi-armory"',
-      'keychain: "/test.keychain"',
-      "version: 512",
-      'class: "genp"',
-      "attributes:",
-      '    0x00000007 <blob>="other-service"',
-      '    "acct"<blob>="account-two"',
-      '    "svce"<blob>="other-service"',
-      'keychain: "/test.keychain"',
-      "version: 512",
-      'class: "genp"',
-      "attributes:",
-      '    "acct"<blob>="account-three"',
-      '    "svce"<blob>="pi-armory"',
-    ].join("\n");
-    mockResolve(ok(dumpOutput));
-    const result = await listSecrets();
-    expect(result).toEqual(["account-one", "account-three"]);
-  });
-
-  it("returns empty array when no pi-armory entries exist", async () => {
-    const dumpOutput = [
-      'keychain: "/test.keychain"',
-      'class: "genp"',
-      "attributes:",
-      '    "acct"<blob>="account-two"',
-      '    "svce"<blob>="other-service"',
-    ].join("\n");
-    mockResolve(ok(dumpOutput));
-    const result = await listSecrets();
-    expect(result).toEqual([]);
-  });
-
-  it("returns empty array for empty dump output", async () => {
+  it("returns found accounts that exist in keychain", async () => {
     mockResolve(ok(""));
-    const result = await listSecrets();
-    expect(result).toEqual([]);
+    const result = await listSecrets(["account-one", "account-two"]);
+    expect(result.found).toEqual(["account-one", "account-two"]);
+    expect(result.missing).toEqual([]);
   });
 
-  it("throws a descriptive error on execFile failure", async () => {
-    mockReject(new Error("permission denied"));
-    await expect(listSecrets()).rejects.toThrow(/failed to list secrets/);
+  it("returns missing accounts that don't exist in keychain", async () => {
+    mockReject(new Error("item not found"));
+    const result = await listSecrets(["account-one", "account-two"]);
+    expect(result.found).toEqual([]);
+    expect(result.missing).toEqual(["account-one", "account-two"]);
+  });
+
+  it("separates found and missing accounts", async () => {
+    mockExecFile.mockImplementation((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (
+        err: Error | null,
+        result: { stdout: string; stderr: string } | null,
+      ) => void;
+      const cmdArgs = args[1] as string[];
+      if (cmdArgs.includes("exists")) {
+        cb(null, { stdout: "", stderr: "" });
+      } else {
+        cb(new Error("not found"), null);
+      }
+    });
+    const result = await listSecrets(["exists", "missing"]);
+    expect(result.found).toEqual(["exists"]);
+    expect(result.missing).toEqual(["missing"]);
+  });
+
+  it("returns empty arrays for empty accounts list", async () => {
+    const result = await listSecrets([]);
+    expect(result.found).toEqual([]);
+    expect(result.missing).toEqual([]);
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });
 
