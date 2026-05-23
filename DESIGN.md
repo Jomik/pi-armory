@@ -32,18 +32,27 @@
 - Separate config file (not in pi settings.json), consistent with pi-imps/pi-errands/pi-inquisitor
 - `checks` is just another tool in the armory (e.g. `{ "name": "checks", "command": "npm test && npm run typecheck" }`)
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
-- Armory does not remove or block `bash` — that's not its responsibility. It provides structured tools; the user controls their session's tool set separately.
+- Armory removes `bash` from the active tool set by default (`disableBash: true` in config). This can be disabled by setting `disableBash: false` in global or project config.
 
 ## Config merging
 
 - Global (`~/.pi/agent/armory.json`) and project (`.pi/armory.json`) configs are additive
 - Project tools override global tools with the same name
+- `draftModel` follows the same override: project value wins over global
 - If no config exists, no tools are registered — but `request_tool` is always available so the agent can bootstrap
 
 ## Parameters
 
 Tools can declare named parameters with `parameters: Record<string, { type: "string"; description: string }>`. The command string uses `{{paramName}}` placeholders. At execution time, each placeholder is replaced with the shell-escaped value (`'value'`, with internal single quotes escaped as `'\''`). All declared parameters are required — missing parameters throw an error. This approach prevents injection by containing every value in single quotes regardless of its content.
 
+## Secrets
+
+Tools can reference secrets via `secrets: Record<string, string>` where keys are environment variable names and values are macOS Keychain account identifiers (stored under service "pi-armory").
+
+- At execution time, secrets are fetched from keychain and injected as environment variables
+- Secret values are redacted from all tool output (both streamed updates and final result)
+- `/armory secrets` opens a TUI panel to manage stored keychain entries (set/delete)
+- If a secret is missing from keychain at execution time, the fetch throws an error
 
 1. Agent calls `request_tool` with a proposed `{ name, command, description, requires_approval?, guidelines? }`
 2. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
@@ -71,6 +80,57 @@ Tools can declare named parameters with `parameters: Record<string, { type: "str
 - Non-zero exit code: throw an Error with output + exit code (agent sees it as a tool failure)
 - Zero exit code: return combined output as text content (stderr included — not an error)
 - No truncation limits or timeouts initially
+
+## Editing tools (`/armory edit`)
+
+Human-initiated flow to revise existing tools, with optional AI assistance.
+
+### Flow
+
+1. `/armory edit [name]` — if name omitted, show a select list of all registered tools
+2. Load the tool's current definition from config (respecting project-overrides-global)
+3. Open the same TUI form used by `request_tool`, pre-populated with current values
+4. Human edits fields directly, or navigates to the Re-draft field and presses Enter to invoke AI re-draft
+5. On approve, save back (to whichever config file it came from, unless destination is toggled)
+6. On reject, no changes
+
+### AI re-draft
+
+Available in both `request_tool` and `/armory edit` forms:
+
+1. User navigates to the Re-draft field (via Tab) and presses Enter → inline instruction input appears: "Instruction (optional): ___"
+2. User types instruction (e.g. "add an env parameter", "make it global") or leaves blank
+3. Current form state is sent to the draft model as context, along with the instruction
+4. LLM returns an updated definition; form fields update in place
+5. User can re-draft again, edit manually, or approve/reject
+
+The re-draft prompt includes the current definition as structured context (not just the raw command), so the model can make targeted improvements rather than starting from scratch.
+
+### Architecture
+
+- Extract the TUI form from `request-tool.ts` into a shared component (e.g. `tool-form.ts`)
+- Both `request_tool` execute and `/armory edit` handler call into the same form
+- The form accepts an initial state (either from a fresh draft or from an existing tool)
+- The Re-draft field triggers an async re-draft; form shows a spinner while waiting, then updates
+- The draft function gains a new signature variant that accepts a full current definition + instruction (not just a raw command)
+
+### Draft function for revisions
+
+New input shape alongside the existing one:
+
+```
+{ current: DraftOutput, instruction?: string }
+```
+
+The system prompt for revisions is minimal: "Given a tool definition and an optional instruction, produce an improved version. Reply with ONLY a JSON object." The existing field rules apply implicitly since the model sees the structure.
+
+### Config write-back
+
+When editing an existing tool:
+- Default destination = where the tool was loaded from (project or global)
+- If the user toggles destination, save to the new location
+- If moving from global → project, the project version overrides (existing merge semantics)
+- If moving from project → global, remove from project config to avoid shadowing
 
 ## Why
 

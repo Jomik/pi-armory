@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
-import { loadConfig, saveConfig } from "../src/config.js";
+import { loadConfig, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
 
 let tmpDir: string;
 let fakeHome: string;
@@ -163,5 +163,93 @@ describe("saveConfig", () => {
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
     expect(content.endsWith("\n")).toBe(true);
     expect(content).toBe(`${JSON.stringify({ tools: [toolA] }, null, 2)}\n`);
+  });
+});
+
+describe("loadToolWithSource", () => {
+  it("returns null when tool does not exist in either config", async () => {
+    const result = await loadToolWithSource("nonexistent", projectRoot, fakeAgentDir);
+    expect(result).toBeNull();
+  });
+
+  it("returns global tool when it exists only in global config", async () => {
+    await writeGlobal([toolA, toolB]);
+    const result = await loadToolWithSource("tool-a", projectRoot, fakeAgentDir);
+    expect(result).toEqual({ tool: toolA, source: "global" });
+  });
+
+  it("returns project tool when it exists only in project config", async () => {
+    await writeProject([toolA]);
+    const result = await loadToolWithSource("tool-a", projectRoot, fakeAgentDir);
+    expect(result).toEqual({ tool: toolA, source: "project" });
+  });
+
+  it("project tool takes precedence over global tool with same name", async () => {
+    await writeGlobal([toolA, toolB]);
+    await writeProject([toolAOverride]);
+    const result = await loadToolWithSource("tool-a", projectRoot, fakeAgentDir);
+    expect(result).toEqual({ tool: toolAOverride, source: "project" });
+  });
+
+  it("returns global tool when project config has different tools", async () => {
+    await writeGlobal([toolA]);
+    await writeProject([toolB]);
+    const result = await loadToolWithSource("tool-a", projectRoot, fakeAgentDir);
+    expect(result).toEqual({ tool: toolA, source: "global" });
+  });
+});
+
+describe("removeFromConfig", () => {
+  it("does nothing if the config file does not exist (ENOENT)", async () => {
+    // Neither project nor global file exists — should not throw
+    await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir)).resolves.toBeUndefined();
+  });
+
+  it("removes a tool from the project config file", async () => {
+    await writeProject([toolA, toolB]);
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[] };
+    expect(parsed.tools).toHaveLength(1);
+    expect(parsed.tools[0].name).toBe("tool-b");
+  });
+
+  it("removes a tool from the global config file", async () => {
+    await writeGlobal([toolA, toolB]);
+    await removeFromConfig("tool-b", "global", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(fakeAgentDir, "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[] };
+    expect(parsed.tools).toHaveLength(1);
+    expect(parsed.tools[0].name).toBe("tool-a");
+  });
+
+  it("preserves other tools when removing one", async () => {
+    await writeProject([toolA, toolB]);
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[] };
+    expect(parsed.tools).toEqual([toolB]);
+  });
+
+  it("does nothing if the tool is not in the file", async () => {
+    await writeProject([toolB]);
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[] };
+    expect(parsed.tools).toEqual([toolB]);
+  });
+
+  it("preserves draftModel when removing a tool", async () => {
+    const dir = path.join(projectRoot, ".pi");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "armory.json"),
+      `${JSON.stringify({ tools: [toolA, toolB], draftModel: "fast-model" }, null, 2)}\n`,
+    );
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir);
+    const content = await readFile(path.join(dir, "armory.json"), "utf-8");
+    const parsed = JSON.parse(content) as { tools: ArmoryTool[]; draftModel?: string };
+    expect(parsed.draftModel).toBe("fast-model");
+    expect(parsed.tools).toEqual([toolB]);
   });
 });

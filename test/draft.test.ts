@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deriveNameFromCommand, parseParameters } from "../src/draft.js";
+import type { DraftOutput, ReviseInput } from "../src/draft.js";
+import { deriveNameFromCommand, parseParameters, reviseDraftDefinition } from "../src/draft.js";
 
 describe("deriveNameFromCommand", () => {
   it("extracts first word from a simple command", () => {
@@ -59,5 +60,40 @@ describe("parseParameters", () => {
     expect(parseParameters({ file: {} })).toEqual({
       file: { description: "file" },
     });
+  });
+});
+
+describe("reviseDraftDefinition", () => {
+  it("is exported as a function", () => {
+    expect(typeof reviseDraftDefinition).toBe("function");
+  });
+
+  it("accepts a valid ReviseInput object", () => {
+    const current: DraftOutput = {
+      name: "run_tests",
+      command: "npm test",
+      description: "Run the test suite",
+      requires_approval: false,
+      guidelines: [],
+      parameters: {},
+      destination: "project",
+    };
+    const input: ReviseInput = { current, instruction: "Add a --watch flag" };
+    expect(input.current.name).toBe("run_tests");
+    expect(input.instruction).toBe("Add a --watch flag");
+  });
+
+  it("accepts ReviseInput without an instruction", () => {
+    const current: DraftOutput = {
+      name: "build",
+      command: "npm run build",
+      description: "Build the project",
+      requires_approval: false,
+      guidelines: [],
+      parameters: {},
+      destination: "global",
+    };
+    const input: ReviseInput = { current };
+    expect(input.instruction).toBeUndefined();
   });
 });

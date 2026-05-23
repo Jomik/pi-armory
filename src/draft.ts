@@ -15,21 +15,27 @@ export interface DraftOutput {
   requires_approval: boolean;
   guidelines: string[];
   parameters: Record<string, { description: string }>;
+  destination: "project" | "global";
 }
 
 const SYSTEM_PROMPT = `You are defining a shell-command tool for a coding agent's armory.
-
 Given a command and optional usage context, produce a JSON tool definition.
 
-Rules:
-- name: lowercase with underscores, concise (e.g. "run_tests", "deploy_staging")
-- command: the shell command. Use {{param_name}} placeholders for dynamic values the agent should provide at call time. Do NOT quote placeholders — they are automatically shell-escaped. Write \`-m {{message}}\` not \`-m "{{message}}"\`. If the command is already complete with no dynamic parts, leave it as-is.
-- description: one sentence explaining what this tool does (shown to the agent)
-- requires_approval: true if the command is destructive, has side effects, or modifies external state
-- guidelines: array of short behavioral instructions for the agent (when to use, when not to, preconditions). Can be empty array.
-- parameters: object mapping each {{placeholder}} name to { "description": "..." }. Describe what the agent should pass. Empty object if no placeholders.
+Fields:
+- name: snake_case verb phrase for the action (e.g. "run_tests", "deploy_staging"), not the binary name.
+- command: the shell command. Replace values that vary between invocations with {{param_name}} placeholders. Never quote placeholders — they are auto shell-escaped. Never prefix with \`cd\` — the caller controls cwd. Prefer long flags when the short form is ambiguous or obscure.
+- description: one sentence explaining what the tool does.
+- requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
+- guidelines: ultra-short hints (≤8 words each). Only if genuinely non-obvious; prefer [].
+- parameters: { "name": { "description": "..." } } for each {{placeholder}}. {} if none.
+- destination: "global" for general-purpose tools usable in any project, "project" for repo-specific scripts/conventions.
 
-Reply with ONLY a JSON object, no markdown fences, no explanation.`;
+Parameterization:
+- Do extract: paths, identifiers, messages, branch/tag names, env names — anything that varies per invocation.
+- Do NOT extract: fixed flags or options that define the tool's purpose (e.g. --force in a force-push tool stays hardcoded).
+- Use disambiguating names when multiple similar params exist ({{target_branch}} vs {{source_branch}}). Single params can be simple ({{branch}}).
+
+Reply with ONLY a JSON object.`;
 
 export async function draftToolDefinition(
   model: Model<Api>,
@@ -75,6 +81,7 @@ export async function draftToolDefinition(
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : [],
         parameters: parseParameters(obj.parameters),
+        destination: obj.destination === "global" ? "global" : "project",
       };
     }
   } catch {
@@ -89,7 +96,74 @@ export async function draftToolDefinition(
     requires_approval: false,
     guidelines: [],
     parameters: {},
+    destination: "project",
   };
+}
+
+export interface ReviseInput {
+  current: DraftOutput;
+  instruction?: string;
+}
+
+const REVISE_PROMPT = `You are improving an existing tool definition for a coding agent's armory.
+Given the current definition and an optional instruction, produce an improved version.
+Follow the same field rules as the original (snake_case name, {{placeholders}} for varying values, no cd, etc.).
+Reply with ONLY a JSON object.`;
+
+export async function reviseDraftDefinition(
+  model: Model<Api>,
+  auth: { apiKey: string; headers?: Record<string, string> },
+  input: ReviseInput,
+  signal?: AbortSignal,
+): Promise<DraftOutput> {
+  const currentJson = JSON.stringify(input.current, null, 2);
+  const userMessage = `Current definition:\n${currentJson}${
+    input.instruction ? `\n\nInstruction: ${input.instruction}` : ""
+  }`;
+
+  let text = "";
+  const stream = streamSimple(
+    model,
+    {
+      systemPrompt: REVISE_PROMPT,
+      messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
+    },
+    { apiKey: auth.apiKey, ...(auth.headers ? { headers: auth.headers } : {}), signal },
+  );
+
+  for await (const event of stream) {
+    if (event.type === "text_delta") {
+      text += event.delta;
+    }
+  }
+
+  try {
+    const cleaned = text
+      .replace(/^```(?:json)?\s*\n?/m, "")
+      .replace(/\n?```\s*$/m, "")
+      .trim();
+    const parsed = JSON.parse(cleaned) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      return {
+        name: typeof obj.name === "string" ? obj.name : input.current.name,
+        command: typeof obj.command === "string" ? obj.command : input.current.command,
+        description: typeof obj.description === "string" ? obj.description : input.current.description,
+        requires_approval:
+          typeof obj.requires_approval === "boolean" ? obj.requires_approval : input.current.requires_approval,
+        guidelines: Array.isArray(obj.guidelines)
+          ? obj.guidelines.filter((g): g is string => typeof g === "string")
+          : input.current.guidelines,
+        parameters: parseParameters(obj.parameters) ?? input.current.parameters,
+        destination: obj.destination === "global" ? "global" : input.current.destination,
+      };
+    }
+  } catch {
+    // Fall through to fallback
+  }
+
+  // Fallback: return the current definition unchanged
+  return input.current;
 }
 
 export function parseParameters(raw: unknown): Record<string, { description: string }> {
