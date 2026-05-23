@@ -9,8 +9,10 @@ const factory: ExtensionFactory = async (pi) => {
   const { tools, draftModel, disableBash } = await loadConfig(projectRoot);
 
   if (disableBash) {
-    const active = pi.getActiveTools().filter((name) => name !== "bash");
-    pi.setActiveTools(active);
+    pi.on("session_start", async (_event, _ctx) => {
+      const active = pi.getActiveTools().filter((name) => name !== "bash");
+      pi.setActiveTools(active);
+    });
   }
 
   for (const tool of tools) {

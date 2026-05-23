@@ -18,6 +18,7 @@ const toolB: ArmoryTool = { name: "tool-b", command: "echo b", description: "Too
 const fakePi = {
   getActiveTools: () => ["bash", "read", "write", "edit"],
   setActiveTools: vi.fn(),
+  on: vi.fn(),
 } as unknown as Parameters<typeof factory>[0];
 
 describe("factory", () => {
