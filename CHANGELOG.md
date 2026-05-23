@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Jomik/pi-armory/compare/v0.2.0...v0.2.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* move setActiveTools to session_start handler ([cb2c442](https://github.com/Jomik/pi-armory/commit/cb2c4424e29a0acd14a92eb4d033d8dbb0392d2f))
+
 ## [0.2.0](https://github.com/Jomik/pi-armory/compare/v0.1.0...v0.2.0) (2026-05-23)
 
 
