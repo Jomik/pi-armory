@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/Jomik/pi-armory/compare/v0.2.1...v0.3.0) (2026-05-24)
+
+
+### Features
+
+* **edit:** add /armory edit with Re-draft button ([#4](https://github.com/Jomik/pi-armory/issues/4)) ([440575e](https://github.com/Jomik/pi-armory/commit/440575e36783d42e52a0c5a9f97096455ef0c97f))
+
+
+### Bug Fixes
+
+* block parallel request_tool calls ([#9](https://github.com/Jomik/pi-armory/issues/9)) ([21ad2b8](https://github.com/Jomik/pi-armory/commit/21ad2b84a572311c71c2da4ba34414c7ead3ef96))
+* re-register tool after edit so changes take effect immediately ([#10](https://github.com/Jomik/pi-armory/issues/10)) ([968a0a4](https://github.com/Jomik/pi-armory/commit/968a0a41d7d25fe1ac0f7fc0b8bea0a3ab1ad821))
+* serialize approval dialogs via tool_call event ([#8](https://github.com/Jomik/pi-armory/issues/8)) ([4bfd8fe](https://github.com/Jomik/pi-armory/commit/4bfd8fef0d61eb9093c9708e269e51eb079ccb9f))
+
 ## [0.2.1](https://github.com/Jomik/pi-armory/compare/v0.2.0...v0.2.1) (2026-05-23)
 
 
