@@ -1,7 +1,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { registerArmoryCommand } from "./manage-secrets.js";
-import { registerArmoryTool } from "./register-tool.js";
+import { approvalRegistry, interpolateCommand, registerArmoryTool } from "./register-tool.js";
 import { registerRequestTool } from "./request-tool.js";
 
 const factory: ExtensionFactory = async (pi) => {
@@ -18,6 +18,23 @@ const factory: ExtensionFactory = async (pi) => {
   for (const tool of tools) {
     registerArmoryTool(pi, tool);
   }
+
+  // Approval gate via tool_call event — preflighted sequentially by pi,
+  // so concurrent tool calls with requires_approval serialize naturally.
+  // Uses approvalRegistry which is updated by registerArmoryTool (including runtime registrations).
+  pi.on("tool_call", async (event, ctx) => {
+    const tool = approvalRegistry.get(event.toolName);
+    if (!tool) return;
+
+    const command = tool.parameters
+      ? interpolateCommand(tool.command, event.input as Record<string, unknown>)
+      : tool.command;
+
+    const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
+    if (!approved) {
+      return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+    }
+  });
 
   registerRequestTool(pi, projectRoot, draftModel);
   registerArmoryCommand(pi, { tools, projectRoot, draftModelName: draftModel });
