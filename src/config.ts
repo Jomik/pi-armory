@@ -93,6 +93,51 @@ export async function loadConfig(
   };
 }
 
+export async function loadToolWithSource(
+  name: string,
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<{ tool: ArmoryTool; source: "project" | "global" } | null> {
+  const globalPath = path.join(agentDir, "armory.json");
+  const projectPath = path.join(projectRoot, ".pi", "armory.json");
+
+  const [globalResult, projectResult] = await Promise.all([readToolsFile(globalPath), readToolsFile(projectPath)]);
+
+  // Project overrides global
+  const projectTool = projectResult.tools.find((t) => t.name === name);
+  if (projectTool) return { tool: projectTool, source: "project" };
+
+  const globalTool = globalResult.tools.find((t) => t.name === name);
+  if (globalTool) return { tool: globalTool, source: "global" };
+
+  return null;
+}
+
+export async function removeFromConfig(
+  toolName: string,
+  destination: "project" | "global",
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<void> {
+  const filePath =
+    destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(agentDir, "armory.json");
+
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf-8");
+  } catch (err: unknown) {
+    if (isEnoent(err)) return;
+    throw err;
+  }
+
+  const existing = parseToolsJson(content, filePath, "ignoring");
+  if (!existing) return;
+
+  const tools = existing.tools.filter((t) => t.name !== toolName);
+  const { tools: _discarded, ...rest } = existing;
+  await writeFile(filePath, `${JSON.stringify({ ...rest, tools }, null, 2)}\n`, "utf-8");
+}
+
 export async function saveConfig(
   tool: ArmoryTool,
   destination: "project" | "global",

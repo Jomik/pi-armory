@@ -20,7 +20,7 @@ const factory: ExtensionFactory = async (pi) => {
   }
 
   registerRequestTool(pi, projectRoot, draftModel);
-  registerArmoryCommand(pi, tools);
+  registerArmoryCommand(pi, { tools, projectRoot, draftModelName: draftModel });
 };
 
 export default factory;

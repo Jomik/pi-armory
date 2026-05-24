@@ -1,28 +1,17 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type ArmoryTool, saveConfig } from "./config.js";
-import type { DraftOutput } from "./draft.js";
-import { draftToolDefinition } from "./draft.js";
+import { saveConfig } from "./config.js";
+import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool } from "./register-tool.js";
+import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
 
-interface RequestToolResult {
-  name: string;
-  command: string;
-  description: string;
-  guidelines: string[];
-  requiresApproval: boolean;
-  destination: "project" | "global";
-}
+export { extractPlaceholders } from "./shared.js";
+
+import { type ToolFormCallbacks, type ToolFormResult, toolFormPanel } from "./tool-form.js";
 
 const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
-
-export function extractPlaceholders(command: string): string[] {
-  const matches = command.matchAll(/\{\{(\w+)\}\}/g);
-  return [...new Set([...matches].map((m) => m[1]))];
-}
 
 export function normalizeName(name: string): string {
   return name
@@ -56,12 +45,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       // Resolve draft model: prefer configured "provider:modelId", fall back to session model
       let draftModel: Model<Api> | undefined;
       if (draftModelName) {
-        const colonIdx = draftModelName.indexOf(":");
-        if (colonIdx > 0) {
-          const provider = draftModelName.slice(0, colonIdx);
-          const modelId = draftModelName.slice(colonIdx + 1);
-          draftModel = ctx.modelRegistry.find(provider, modelId);
-        }
+        draftModel = resolveModel(ctx.modelRegistry, draftModelName);
       }
       if (!draftModel) {
         draftModel = ctx.model as Model<Api> | undefined;
@@ -84,243 +68,25 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         }
       }
 
-      const result = await ctx.ui.custom<RequestToolResult | null>((tui, theme, _keybindings, done) => {
-        let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination
-        let requiresApproval = drafted?.requires_approval ?? false;
-        let destination: "project" | "global" = "project";
-        let guidelines: string[] = drafted?.guidelines ?? [];
-
-        const editorTheme = {
-          borderColor: (s: string) => theme.fg("border", s),
-          selectList: {
-            selectedPrefix: (s: string) => theme.fg("accent", s),
-            selectedText: (s: string) => theme.fg("accent", s),
-            description: (s: string) => theme.fg("muted", s),
-            scrollInfo: (s: string) => theme.fg("dim", s),
-            noMatch: (s: string) => theme.fg("muted", s),
-          },
+      const result = await ctx.ui.custom<ToolFormResult | null>((tui, theme, _keybindings, done) => {
+        const dm = draftModel;
+        const formCallbacks: ToolFormCallbacks = {
+          onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
         };
-
-        const nameEditor = new Editor(tui, editorTheme);
-        const commandEditor = new Editor(tui, editorTheme);
-        const descEditor = new Editor(tui, editorTheme);
-        const guidelinesEditor = new Editor(tui, editorTheme);
-
-        nameEditor.setText(drafted?.name ?? "");
-        commandEditor.setText(drafted?.command ?? params.command);
-        descEditor.setText(drafted?.description ?? params.usage ?? "");
-
-        const textEditors = [nameEditor, commandEditor, descEditor];
-
-        function currentResult(): RequestToolResult {
-          return {
-            name: nameEditor.getText(),
-            command: commandEditor.getText(),
-            description: descEditor.getText(),
-            guidelines,
-            requiresApproval,
-            destination,
-          };
-        }
-
-        return {
-          invalidate() {
-            for (const ed of textEditors) ed.invalidate();
-            guidelinesEditor.invalidate();
+        return toolFormPanel(
+          tui,
+          theme,
+          done,
+          {
+            name: drafted?.name ?? "",
+            command: drafted?.command ?? params.command,
+            description: drafted?.description ?? params.usage ?? "",
+            guidelines: drafted?.guidelines ?? [],
+            requiresApproval: drafted?.requires_approval ?? false,
+            destination: drafted?.destination ?? "project",
           },
-
-          render(width: number): string[] {
-            const lines: string[] = [];
-            const maxW = Math.min(width, 100);
-            const hr = theme.fg("accent", "─".repeat(maxW));
-            const LABEL = 14;
-            const fieldWidth = Math.max(maxW - LABEL - 3, 8);
-
-            // Set focused state on editors for cursor visibility
-            for (let i = 0; i < 3; i++) {
-              textEditors[i].focused = focus === i;
-            }
-            guidelinesEditor.focused = focus === 3;
-
-            lines.push(hr);
-            lines.push(` ${theme.fg("accent", theme.bold("Request Tool"))}`);
-            lines.push("");
-
-            const fieldLabels = ["Name:", "Command:", "Description:"];
-            for (let i = 0; i < 3; i++) {
-              const label = (fieldLabels[i] ?? "").padEnd(LABEL);
-              if (focus === i) {
-                const edLines = textEditors[i].render(fieldWidth);
-                const midLine = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
-                for (let j = 0; j < edLines.length; j++) {
-                  if (j === midLine) {
-                    lines.push(` ${theme.fg("accent", label)} ${edLines[j]}`);
-                  } else {
-                    lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
-                  }
-                }
-              } else {
-                const wrapped = wrapTextWithAnsi(theme.fg("text", textEditors[i].getText()), fieldWidth);
-                for (let j = 0; j < wrapped.length; j++) {
-                  if (j === 0) {
-                    lines.push(` ${theme.fg("muted", label)} ${wrapped[j]}`);
-                  } else {
-                    lines.push(` ${" ".repeat(LABEL)} ${wrapped[j]}`);
-                  }
-                }
-              }
-            }
-
-            lines.push("");
-
-            // Guidelines field
-            const guidelinesLabel = "Guidelines:".padEnd(LABEL);
-            if (focus === 3) {
-              for (let i = 0; i < guidelines.length; i++) {
-                const prefix = i === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
-                const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
-                for (let j = 0; j < wrapped.length; j++) {
-                  lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
-                }
-              }
-              const edLines = guidelinesEditor.render(fieldWidth);
-              const edMid = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
-              for (let j = 0; j < edLines.length; j++) {
-                if (j === edMid) {
-                  const prefix = guidelines.length === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
-                  lines.push(` ${prefix} ${edLines[j]}`);
-                } else {
-                  lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
-                }
-              }
-            } else if (guidelines.length === 0) {
-              lines.push(` ${theme.fg("muted", guidelinesLabel)} ${theme.fg("dim", "(none)")}`);
-            } else {
-              for (let i = 0; i < guidelines.length; i++) {
-                const prefix = i === 0 ? theme.fg("muted", guidelinesLabel) : " ".repeat(LABEL);
-                const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
-                for (let j = 0; j < wrapped.length; j++) {
-                  lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
-                }
-              }
-            }
-
-            lines.push("");
-
-            // Parameters (read-only, auto-detected)
-            const paramsLabel = "Parameters:".padEnd(LABEL);
-            const placeholders = extractPlaceholders(commandEditor.getText());
-            const paramsText = placeholders.length > 0 ? placeholders.join(", ") : "(none)";
-            lines.push(` ${theme.fg("muted", paramsLabel)} ${theme.fg("dim", paramsText)}`);
-
-            lines.push("");
-
-            // Approval toggle
-            const approvalLabel = "Approval:".padEnd(LABEL);
-            const noMark = requiresApproval ? "○" : "●";
-            const yesMark = requiresApproval ? "●" : "○";
-            lines.push(
-              ` ${focus === 4 ? theme.fg("accent", approvalLabel) : theme.fg("muted", approvalLabel)} ${theme.fg("text", `${noMark} No  ${yesMark} Yes`)}`,
-            );
-
-            // Destination toggle
-            const destLabel = "Destination:".padEnd(LABEL);
-            const projMark = destination === "project" ? "●" : "○";
-            const globMark = destination === "global" ? "●" : "○";
-            lines.push(
-              ` ${focus === 5 ? theme.fg("accent", destLabel) : theme.fg("muted", destLabel)} ${theme.fg("text", `${projMark} Project  ${globMark} Global`)}`,
-            );
-
-            lines.push("");
-            let hint: string;
-            if (focus < 3) {
-              hint = "Enter next field  •  Esc reject  •  Tab next field";
-            } else if (focus === 3) {
-              hint = "Enter add guideline  •  Backspace remove last  •  Esc reject  •  Tab next field";
-            } else {
-              hint = "Enter approve  •  Esc reject  •  ←→/Space toggle";
-            }
-            lines.push(` ${theme.fg("dim", hint)}`);
-            lines.push(hr);
-
-            return lines.map((line) => truncateToWidth(line, width));
-          },
-
-          handleInput(data: string) {
-            if (matchesKey(data, Key.escape)) {
-              done(null);
-              return;
-            }
-
-            if (matchesKey(data, Key.up)) {
-              focus = (focus + 5) % 6;
-              tui.requestRender();
-              return;
-            }
-
-            if (matchesKey(data, Key.down) || matchesKey(data, Key.tab)) {
-              focus = (focus + 1) % 6;
-              tui.requestRender();
-              return;
-            }
-
-            if (matchesKey(data, Key.enter)) {
-              if (focus < 3) {
-                // Advance from text editor to next field
-                focus = (focus + 1) % 6;
-                tui.requestRender();
-              } else if (focus === 3) {
-                // Guidelines field: add guideline or advance
-                const text = guidelinesEditor.getText().trim();
-                if (text) {
-                  guidelines = [...guidelines, text];
-                  guidelinesEditor.setText("");
-                  tui.requestRender();
-                } else {
-                  focus = 4;
-                  tui.requestRender();
-                }
-              } else {
-                done(currentResult());
-              }
-              return;
-            }
-
-            // Guidelines field
-            if (focus === 3) {
-              if (matchesKey(data, Key.backspace) && guidelinesEditor.getText() === "" && guidelines.length > 0) {
-                guidelines = guidelines.slice(0, -1);
-                tui.requestRender();
-                return;
-              }
-              guidelinesEditor.handleInput(data);
-              tui.requestRender();
-              return;
-            }
-
-            // Approval toggle
-            if (focus === 4) {
-              if (matchesKey(data, Key.space) || matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
-                requiresApproval = !requiresApproval;
-                tui.requestRender();
-              }
-              return;
-            }
-
-            // Destination toggle
-            if (focus === 5) {
-              if (matchesKey(data, Key.space) || matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
-                destination = destination === "project" ? "global" : "project";
-                tui.requestRender();
-              }
-              return;
-            }
-
-            // Route to focused text editor
-            textEditors[focus]?.handleInput(data);
-            tui.requestRender();
-          },
-        };
+          formCallbacks,
+        );
       });
 
       if (result === null) {
@@ -351,24 +117,10 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
-      const placeholders = extractPlaceholders(result.command);
-      const tool: ArmoryTool = {
-        name,
-        command: result.command,
-        description: result.description,
-        ...(result.requiresApproval ? { requires_approval: true } : {}),
-        ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
-        ...(placeholders.length > 0
-          ? {
-              parameters: Object.fromEntries(
-                placeholders.map((p) => [
-                  p,
-                  { type: "string" as const, description: drafted?.parameters[p]?.description },
-                ]),
-              ),
-            }
-          : {}),
-      };
+      const parameterDescriptions = drafted?.parameters
+        ? Object.fromEntries(Object.entries(drafted.parameters).map(([k, v]) => [k, v.description]))
+        : undefined;
+      const tool = buildToolFromResult({ ...result, name }, { parameterDescriptions });
 
       await saveConfig(tool, result.destination, projectRoot);
       registerArmoryTool(pi, tool);
