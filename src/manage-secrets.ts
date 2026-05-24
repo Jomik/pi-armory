@@ -2,6 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import { approvalRegistry, registerArmoryTool } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
 import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
 import { type ToolFormResult, toolFormPanel } from "./tool-form.js";
@@ -37,7 +38,7 @@ export function registerArmoryCommand(pi: ExtensionAPI, deps: ArmoryCommandDeps)
       const sub = trimmed.toLowerCase();
       if (sub === "edit" || sub.startsWith("edit ")) {
         const toolName = trimmed.slice(4).trim() || undefined;
-        await handleEdit(ctx, deps, toolName);
+        await handleEdit(pi, ctx, deps, toolName);
       } else if (sub === "secrets") {
         await handleSecrets(ctx, deps.tools);
       } else {
@@ -76,7 +77,12 @@ async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
   );
 }
 
-async function handleEdit(ctx: ExtensionCommandContext, deps: ArmoryCommandDeps, toolName?: string): Promise<void> {
+async function handleEdit(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  deps: ArmoryCommandDeps,
+  toolName?: string,
+): Promise<void> {
   // If no name, show a picker
   let selectedName = toolName;
   if (!selectedName) {
@@ -146,5 +152,18 @@ async function handleEdit(ctx: ExtensionCommandContext, deps: ArmoryCommandDeps,
     await removeFromConfig(tool.name, source, deps.projectRoot);
   }
 
+  approvalRegistry.delete(tool.name);
+  registerArmoryTool(pi, updatedTool);
+  const oldIdx = deps.tools.findIndex((t) => t.name === tool.name);
+  if (oldIdx !== -1) {
+    deps.tools.splice(oldIdx, 1);
+  }
+  deps.tools.push(updatedTool);
+  // Deactivate old tool name on rename — pi has no unregisterTool API,
+  // but we can remove it from the active set so the agent won't invoke it.
+  if (updatedTool.name !== tool.name) {
+    const active = pi.getActiveTools().filter((name) => name !== tool.name);
+    pi.setActiveTools(active);
+  }
   ctx.ui.notify(`Tool '${updatedTool.name}' updated`, "info");
 }
