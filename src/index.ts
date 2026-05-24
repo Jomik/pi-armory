@@ -22,7 +22,17 @@ const factory: ExtensionFactory = async (pi) => {
   // Approval gate via tool_call event — preflighted sequentially by pi,
   // so concurrent tool calls with requires_approval serialize naturally.
   // Uses approvalRegistry which is updated by registerArmoryTool (including runtime registrations).
+  // Also blocks parallel request_tool calls (only one form at a time).
+  let requestToolInFlight = false;
   pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "request_tool") {
+      if (requestToolInFlight) {
+        return { block: true, reason: "request_tool is already in progress. Call it one at a time." };
+      }
+      requestToolInFlight = true;
+      return;
+    }
+
     const tool = approvalRegistry.get(event.toolName);
     if (!tool) return;
 
@@ -33,6 +43,12 @@ const factory: ExtensionFactory = async (pi) => {
     const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
     if (!approved) {
       return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+    }
+  });
+
+  pi.on("tool_execution_end", async (event) => {
+    if (event.toolName === "request_tool") {
+      requestToolInFlight = false;
     }
   });
 
