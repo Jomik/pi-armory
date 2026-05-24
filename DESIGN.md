@@ -32,7 +32,7 @@
 - Separate config file (not in pi settings.json), consistent with pi-imps/pi-errands/pi-inquisitor
 - `checks` is just another tool in the armory (e.g. `{ "name": "checks", "command": "npm test && npm run typecheck" }`)
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
-- Armory removes `bash` from the active tool set by default (`disableBash: true` in config). This can be disabled by setting `disableBash: false` in global or project config.
+- Armory removes `bash` from the active tool set by default (`disableBash: true` in global config). Set `disableBash: false` in global config to disable.
 
 ## Config merging
 

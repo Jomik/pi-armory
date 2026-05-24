@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { extractPlaceholders } from "./shared.js";
 
 export interface ToolFormState {
   /** Optional title shown at top of form. Defaults to "Request Tool". */
@@ -24,11 +25,6 @@ export interface ToolFormResult {
   guidelines: string[];
   requiresApproval: boolean;
   destination: "project" | "global";
-}
-
-function extractPlaceholders(command: string): string[] {
-  const matches = command.matchAll(/\{\{(\w+)\}\}/g);
-  return [...new Set([...matches].map((m) => m[1]))];
 }
 
 export function toolFormPanel(

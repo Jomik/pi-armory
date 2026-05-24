@@ -2,9 +2,8 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
-import { reviseDraftDefinition } from "./draft.js";
-import { extractPlaceholders } from "./request-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
+import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
 import { type ToolFormResult, toolFormPanel } from "./tool-form.js";
 
 export interface ArmoryCommandDeps {
@@ -104,18 +103,12 @@ async function handleEdit(ctx: ExtensionCommandContext, deps: ArmoryCommandDeps,
   // Resolve draft model — same pattern as request-tool.ts
   let draftModel: Model<Api> | undefined;
   if (deps.draftModelName) {
-    const colonIdx = deps.draftModelName.indexOf(":");
-    if (colonIdx > 0) {
-      const provider = deps.draftModelName.slice(0, colonIdx);
-      const modelId = deps.draftModelName.slice(colonIdx + 1);
-      draftModel = ctx.modelRegistry.find(provider, modelId);
-    }
+    draftModel = resolveModel(ctx.modelRegistry, deps.draftModelName);
   }
   if (!draftModel) {
     draftModel = ctx.model as Model<Api> | undefined;
   }
 
-  // Show the form pre-populated with existing tool values
   const dm = draftModel;
   const result = await ctx.ui.custom<ToolFormResult | null>((tui, theme, _keybindings, done) => {
     return toolFormPanel(
@@ -132,66 +125,17 @@ async function handleEdit(ctx: ExtensionCommandContext, deps: ArmoryCommandDeps,
         destination: source,
       },
       {
-        onRedraft: dm
-          ? async (current, instruction) => {
-              const auth = await ctx.modelRegistry.getApiKeyAndHeaders(dm);
-              if (!auth.ok) return null;
-              // Build adapted parameters for DraftOutput shape
-              const adaptedParams: Record<string, { description: string }> = {};
-              for (const [key, val] of Object.entries(tool.parameters ?? {})) {
-                adaptedParams[key] = { description: val.description ?? key };
-              }
-              const revised = await reviseDraftDefinition(
-                dm,
-                { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
-                {
-                  current: {
-                    name: current.name,
-                    command: current.command,
-                    description: current.description,
-                    guidelines: current.guidelines,
-                    requires_approval: current.requiresApproval,
-                    destination: current.destination,
-                    parameters: adaptedParams,
-                  },
-                  instruction,
-                },
-                ctx.signal,
-              );
-              return {
-                name: revised.name,
-                command: revised.command,
-                description: revised.description,
-                guidelines: revised.guidelines,
-                requiresApproval: revised.requires_approval,
-                destination: revised.destination,
-              };
-            }
-          : undefined,
+        onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
       },
     );
   });
 
   if (!result) return; // user rejected
 
-  // Build updated tool from result
-  const placeholders = extractPlaceholders(result.command);
-  const updatedTool: ArmoryTool = {
-    name: result.name,
-    command: result.command,
-    description: result.description,
-    ...(result.requiresApproval ? { requires_approval: true } : {}),
-    ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
-    ...(placeholders.length > 0
-      ? {
-          parameters: Object.fromEntries(
-            placeholders.map((p) => [p, { type: "string" as const, description: tool.parameters?.[p]?.description }]),
-          ),
-        }
-      : {}),
-    // Preserve secrets if they existed
-    ...(tool.secrets ? { secrets: tool.secrets } : {}),
-  };
+  const parameterDescriptions = tool.parameters
+    ? Object.fromEntries(Object.entries(tool.parameters).map(([k, v]) => [k, v.description]))
+    : undefined;
+  const updatedTool = buildToolFromResult(result, { parameterDescriptions, secrets: tool.secrets });
 
   // Save to new (or same) destination
   await saveConfig(updatedTool, result.destination, deps.projectRoot);

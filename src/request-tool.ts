@@ -1,18 +1,17 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type ArmoryTool, saveConfig } from "./config.js";
-import { type DraftOutput, draftToolDefinition, reviseDraftDefinition } from "./draft.js";
+import { saveConfig } from "./config.js";
+import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool } from "./register-tool.js";
+import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
+
+export { extractPlaceholders } from "./shared.js";
+
 import { type ToolFormCallbacks, type ToolFormResult, toolFormPanel } from "./tool-form.js";
 
 const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
-
-export function extractPlaceholders(command: string): string[] {
-  const matches = command.matchAll(/\{\{(\w+)\}\}/g);
-  return [...new Set([...matches].map((m) => m[1]))];
-}
 
 export function normalizeName(name: string): string {
   return name
@@ -46,12 +45,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       // Resolve draft model: prefer configured "provider:modelId", fall back to session model
       let draftModel: Model<Api> | undefined;
       if (draftModelName) {
-        const colonIdx = draftModelName.indexOf(":");
-        if (colonIdx > 0) {
-          const provider = draftModelName.slice(0, colonIdx);
-          const modelId = draftModelName.slice(colonIdx + 1);
-          draftModel = ctx.modelRegistry.find(provider, modelId);
-        }
+        draftModel = resolveModel(ctx.modelRegistry, draftModelName);
       }
       if (!draftModel) {
         draftModel = ctx.model as Model<Api> | undefined;
@@ -77,33 +71,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       const result = await ctx.ui.custom<ToolFormResult | null>((tui, theme, _keybindings, done) => {
         const dm = draftModel;
         const formCallbacks: ToolFormCallbacks = {
-          onRedraft: dm
-            ? async (current, instruction) => {
-                const auth = await ctx.modelRegistry.getApiKeyAndHeaders(dm);
-                if (!auth.ok) return null;
-                const revised = await reviseDraftDefinition(
-                  dm,
-                  { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
-                  {
-                    current: {
-                      ...current,
-                      requires_approval: current.requiresApproval,
-                      parameters: drafted?.parameters ?? {},
-                    },
-                    instruction,
-                  },
-                  signal,
-                );
-                return {
-                  name: revised.name,
-                  command: revised.command,
-                  description: revised.description,
-                  guidelines: revised.guidelines,
-                  requiresApproval: revised.requires_approval,
-                  destination: revised.destination,
-                };
-              }
-            : undefined,
+          onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
         };
         return toolFormPanel(
           tui,
@@ -149,24 +117,10 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
-      const placeholders = extractPlaceholders(result.command);
-      const tool: ArmoryTool = {
-        name,
-        command: result.command,
-        description: result.description,
-        ...(result.requiresApproval ? { requires_approval: true } : {}),
-        ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
-        ...(placeholders.length > 0
-          ? {
-              parameters: Object.fromEntries(
-                placeholders.map((p) => [
-                  p,
-                  { type: "string" as const, description: drafted?.parameters[p]?.description },
-                ]),
-              ),
-            }
-          : {}),
-      };
+      const parameterDescriptions = drafted?.parameters
+        ? Object.fromEntries(Object.entries(drafted.parameters).map(([k, v]) => [k, v.description]))
+        : undefined;
+      const tool = buildToolFromResult({ ...result, name }, { parameterDescriptions });
 
       await saveConfig(tool, result.destination, projectRoot);
       registerArmoryTool(pi, tool);

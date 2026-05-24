@@ -32,16 +32,16 @@ describe("deriveNameFromCommand", () => {
 });
 
 describe("parseParameters", () => {
-  it("returns {} for null", () => {
-    expect(parseParameters(null)).toEqual({});
+  it("returns undefined for null", () => {
+    expect(parseParameters(null)).toBeUndefined();
   });
 
-  it("returns {} for undefined", () => {
-    expect(parseParameters(undefined)).toEqual({});
+  it("returns undefined for undefined", () => {
+    expect(parseParameters(undefined)).toBeUndefined();
   });
 
-  it("returns {} for an array", () => {
-    expect(parseParameters([])).toEqual({});
+  it("returns undefined for an array", () => {
+    expect(parseParameters([])).toBeUndefined();
   });
 
   it("passes through a valid parameter entry", () => {

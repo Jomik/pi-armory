@@ -80,7 +80,7 @@ export async function draftToolDefinition(
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : [],
-        parameters: parseParameters(obj.parameters),
+        parameters: parseParameters(obj.parameters) ?? {},
         destination: obj.destination === "global" ? "global" : "project",
       };
     }
@@ -166,8 +166,8 @@ export async function reviseDraftDefinition(
   return input.current;
 }
 
-export function parseParameters(raw: unknown): Record<string, { description: string }> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+export function parseParameters(raw: unknown): Record<string, { description: string }> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const result: Record<string, { description: string }> = {};
   for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
     if (
