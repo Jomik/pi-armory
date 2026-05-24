@@ -30,6 +30,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       "Request a new armory tool to be registered. Presents a form for the user to review, edit, and approve the proposed tool before it is added to the armory.",
     promptSnippet:
       "request_tool: propose a shell command to be registered as a reusable tool. A model will draft the full tool definition for human review.",
+    promptGuidelines: ["Only call request_tool one at a time. Never make parallel request_tool calls."],
     parameters: Type.Object({
       command: Type.String({ description: "Shell command to run (or approximate command)" }),
       usage: Type.Optional(Type.String({ description: "Why this tool is needed / when to use it" })),
