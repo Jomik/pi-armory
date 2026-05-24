@@ -8,7 +8,7 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function interpolateCommand(command: string, params: Record<string, unknown>): string {
+export function interpolateCommand(command: string, params: Record<string, unknown>): string {
   return command.replace(/(["'])\{\{(\w+)\}\}\1|\{\{(\w+)\}\}/g, (_match, _quote, quotedKey, bareKey) => {
     const key = quotedKey ?? bareKey;
     if (!(key in params)) {
@@ -18,7 +18,13 @@ function interpolateCommand(command: string, params: Record<string, unknown>): s
   });
 }
 
+/** Tools with requires_approval, keyed by name. Updated by registerArmoryTool. */
+export const approvalRegistry = new Map<string, ArmoryTool>();
+
 export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
+  if (tool.requires_approval) {
+    approvalRegistry.set(tool.name, tool);
+  }
   const schema = tool.parameters
     ? Type.Object(
         Object.fromEntries(
@@ -42,17 +48,6 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       const command = tool.parameters
         ? interpolateCommand(tool.command, params as Record<string, unknown>)
         : tool.command;
-
-      // If requires_approval, confirm with user first
-      if (tool.requires_approval) {
-        const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
-        if (!approved) {
-          return {
-            content: [{ type: "text", text: `Execution of '${tool.name}' rejected by user. Command was: ${command}` }],
-            details: undefined,
-          };
-        }
-      }
 
       // Fetch secrets from keychain and prepare extraEnv / redact
       let extraEnv: Record<string, string> | undefined;

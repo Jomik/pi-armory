@@ -122,30 +122,16 @@ describe("registerArmoryTool", () => {
     expect(mockExecuteCommand).toHaveBeenCalledOnce();
   });
 
-  it("prompts and runs command when requires_approval=true and user approves", async () => {
+  it("does not prompt in execute when requires_approval=true (approval handled by tool_call event)", async () => {
     mockExecuteCommand.mockResolvedValue("done");
     const execute = registerAndCapture(approvalTool);
     const ctx = makeCtx(true);
 
     const result = await execute("call-1", {}, new AbortController().signal, undefined, ctx);
 
-    expect(ctx.ui.confirm).toHaveBeenCalledOnce();
-    expect(ctx.ui.confirm).toHaveBeenCalledWith("Run: approval-tool", expect.stringContaining("rm -rf /"));
+    expect(ctx.ui.confirm).not.toHaveBeenCalled();
     expect(mockExecuteCommand).toHaveBeenCalledOnce();
     expect(result.content[0].text).toBe("done");
-  });
-
-  it("returns rejection message and skips command when requires_approval=true and user rejects", async () => {
-    const execute = registerAndCapture(approvalTool);
-    const ctx = makeCtx(false);
-
-    const result = await execute("call-1", {}, new AbortController().signal, undefined, ctx);
-
-    expect(ctx.ui.confirm).toHaveBeenCalledOnce();
-    expect(mockExecuteCommand).not.toHaveBeenCalled();
-    expect(result.content[0].text).toContain("approval-tool");
-    expect(result.content[0].text).toContain("rejected");
-    expect(result.details).toBeUndefined();
   });
 
   it("passes an onUpdate wrapper to executeCommand that forwards updates", async () => {
