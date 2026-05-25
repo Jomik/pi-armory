@@ -253,3 +253,55 @@ describe("removeFromConfig", () => {
     expect(parsed.tools).toEqual([toolB]);
   });
 });
+
+describe("schema validation", () => {
+  it("ignores unknown top-level keys", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(path.join(fakeAgentDir, "armory.json"), JSON.stringify({ tools: [], unknownKey: true }, null, 2));
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("ignores unknown tool keys", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", extra: true }] }, null, 2),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toHaveLength(1);
+    expect(result.tools[0].name).toBe("t");
+  });
+
+  it("rejects tool with wrong field type", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify({ tools: [{ name: 123, command: "echo", description: "d" }] }, null, 2),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects tool missing required fields", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(path.join(fakeAgentDir, "armory.json"), JSON.stringify({ tools: [{ name: "t" }] }, null, 2));
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("accepts valid config with all optional fields", async () => {
+    const tool = {
+      name: "full",
+      command: "echo full",
+      description: "Full tool",
+      requires_approval: true,
+      guidelines: ["Be careful"],
+      parameters: { arg: { type: "string", description: "An arg" } },
+      secrets: { API_KEY: "keychain:api-key" },
+    };
+    await writeGlobal([tool as ArmoryTool]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([tool]);
+  });
+});

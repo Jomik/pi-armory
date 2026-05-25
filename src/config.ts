@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
+import type { ArmoryConfig, ArmoryTool } from "./schema.js";
+import { ArmoryConfigSchema } from "./schema.js";
+
+export type { ArmoryConfig, ArmoryTool } from "./schema.js";
 
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: unknown }).code === "ENOENT";
@@ -11,43 +16,26 @@ function parseToolsJson(
   filePath: string,
   onInvalid: string,
 ): { tools: ArmoryTool[]; draftModel?: string; disableBash?: boolean } | null {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(content) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      Array.isArray((parsed as ArmoryConfig).tools)
-    ) {
-      const cfg = parsed as ArmoryConfig;
-      return {
-        tools: cfg.tools,
-        ...(cfg.draftModel !== undefined ? { draftModel: cfg.draftModel } : {}),
-        ...(cfg.disableBash !== undefined ? { disableBash: cfg.disableBash } : {}),
-      };
-    }
-    console.warn(`pi-armory: invalid config in ${filePath}, ${onInvalid}`);
-    return null;
+    parsed = JSON.parse(content);
   } catch {
     console.warn(`pi-armory: invalid JSON in ${filePath}, ${onInvalid}`);
     return null;
   }
-}
-
-interface ArmoryConfig {
-  draftModel?: string;
-  disableBash?: boolean;
-  tools: ArmoryTool[];
-}
-
-export interface ArmoryTool {
-  name: string;
-  command: string;
-  description: string;
-  requires_approval?: boolean;
-  guidelines?: string[];
-  parameters?: Record<string, { type: "string"; description?: string }>;
-  secrets?: Record<string, string>;
+  if (!Value.Check(ArmoryConfigSchema, parsed)) {
+    const errors = [...Value.Errors(ArmoryConfigSchema, parsed)];
+    const first = errors[0];
+    console.warn(
+      `pi-armory: invalid config in ${filePath}${first ? `: ${first.instancePath || "/"}: ${first.message}` : ""}, ${onInvalid}`,
+    );
+    return null;
+  }
+  return {
+    tools: parsed.tools,
+    ...(parsed.draftModel !== undefined ? { draftModel: parsed.draftModel } : {}),
+    ...(parsed.disableBash !== undefined ? { disableBash: parsed.disableBash } : {}),
+  };
 }
 
 async function readToolsFile(
