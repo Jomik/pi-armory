@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
@@ -43,6 +45,51 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
     promptSnippet: `Runs the command \`${tool.command}\``,
     promptGuidelines: tool.guidelines,
     parameters: schema,
+    renderCall(args, theme, _context) {
+      let text = theme.fg("toolTitle", theme.bold(`${tool.name} `));
+      let cmd: string;
+      try {
+        cmd = tool.parameters ? interpolateCommand(tool.command, args as Record<string, unknown>) : tool.command;
+      } catch {
+        // Args still streaming — show template
+        cmd = tool.command;
+      }
+      text += theme.fg("accent", cmd);
+      return new Text(text, 0, 0);
+    },
+
+    renderResult(result, { expanded, isPartial }, theme, context) {
+      if (isPartial) {
+        return new Text(theme.fg("warning", "Running..."), 0, 0);
+      }
+
+      const content = result.content[0];
+      const output = content?.type === "text" ? content.text : "";
+      const lines = output.split("\n");
+
+      let text: string;
+      if (context.isError) {
+        text = theme.fg("error", "failed");
+      } else {
+        text = theme.fg("success", "done");
+      }
+      text += theme.fg("dim", ` (${lines.length} lines)`);
+
+      if (!expanded) {
+        text += theme.fg("muted", ` ${keyHint("app.tools.expand", "to expand")}`);
+      } else {
+        const preview = lines.slice(0, 30);
+        for (const line of preview) {
+          text += `\n${theme.fg("dim", line)}`;
+        }
+        if (lines.length > 30) {
+          text += `\n${theme.fg("muted", `... ${lines.length - 30} more lines`)}`;
+        }
+      }
+
+      return new Text(text, 0, 0);
+    },
+
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Interpolate parameters into the command string
       const command = tool.parameters

@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
@@ -35,6 +36,15 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       command: Type.String({ description: "Shell command to run (or approximate command)" }),
       usage: Type.Optional(Type.String({ description: "Why this tool is needed / when to use it" })),
     }),
+    renderCall(args, theme, _context) {
+      let text = theme.fg("toolTitle", theme.bold("request_tool "));
+      text += theme.fg("accent", args.command);
+      if (args.usage) {
+        text += `\n${theme.fg("dim", args.usage)}`;
+      }
+      return new Text(text, 0, 0);
+    },
+
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (!ctx.hasUI) {
         return {
