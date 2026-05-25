@@ -31,9 +31,15 @@ Fields:
 - destination: "global" for general-purpose tools usable in any project, "project" for repo-specific scripts/conventions.
 
 Parameterization:
-- Do extract: paths, identifiers, messages, branch/tag names, env names — anything that varies per invocation.
-- Do NOT extract: fixed flags or options that define the tool's purpose (e.g. --force in a force-push tool stays hardcoded).
+The goal is a reusable tool. Extract anything the calling agent might need or want to change between invocations. Keep hardcoded anything that defines the tool's identity and is unlikely to change.
+- Do extract: identifiers, messages, branch/tag names, env names, numeric arguments (counts, limits, line numbers, ports, timeouts).
+- Do NOT extract: the binary/app name, URL schemes (http/https), fixed flags that define the tool's purpose (e.g. --force in a force-push tool), or structural constants.
 - Use disambiguating names when multiple similar params exist ({{target_branch}} vs {{source_branch}}). Single params can be simple ({{branch}}).
+- Examples of correct parameterization:
+  - tail -20 file.log → tail -{{lines}} file.log
+  - grep -C 3 "error" src/ → grep -C {{context_lines}} {{pattern}} src/
+  - curl http://localhost:3000/api → curl http://localhost:{{port}}/{{endpoint}}
+  - head -n 50 → head -n {{lines}}
 
 Reply with ONLY a JSON object.`;
 
