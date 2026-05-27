@@ -5,7 +5,7 @@ import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
 import { approvalRegistry, registerArmoryTool } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
 import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
-import { type ToolFormResult, toolFormPanel } from "./tool-form.js";
+import { type ToolFormRejection, type ToolFormResult, toolFormPanel } from "./tool-form.js";
 
 export interface ArmoryCommandDeps {
   tools: ArmoryTool[];
@@ -116,7 +116,7 @@ async function handleEdit(
   }
 
   const dm = draftModel;
-  const result = await ctx.ui.custom<ToolFormResult | null>((tui, theme, _keybindings, done) => {
+  const result = await ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
     return toolFormPanel(
       tui,
       theme,
@@ -136,7 +136,7 @@ async function handleEdit(
     );
   });
 
-  if (!result) return; // user rejected
+  if ("rejected" in result) return; // user rejected
 
   const updatedTool = buildToolFromResult(result, { secrets: tool.secrets });
 

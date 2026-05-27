@@ -5,7 +5,13 @@ import { streamSimple } from "@earendil-works/pi-ai";
 
 export interface DraftInput {
   command: string;
-  usage?: string;
+  reasoning: string;
+  context?: string;
+}
+
+export interface DraftRejection {
+  rejected: true;
+  reason: string;
 }
 
 export interface DraftOutput {
@@ -18,9 +24,12 @@ export interface DraftOutput {
 }
 
 const SYSTEM_PROMPT = `You are defining a shell-command tool for a coding agent's armory.
-Given a command and optional usage context, produce a JSON tool definition.
+Given a command, reasoning for why it's needed, and optional context (e.g. script contents), produce a JSON tool definition.
 
-Fields:
+If you do NOT have enough information to produce a good definition — for example, the command references a script whose contents were not provided, or the reasoning is too vague to determine proper parameterization — respond with:
+{"rejected": true, "reason": "<what you need>"}
+
+Otherwise, produce a tool definition with these fields:
 - name: snake_case verb phrase for the action (e.g. "run_tests", "deploy_staging"), not the binary name.
 - command: the shell command. Replace values that vary between invocations with {{param_name}} placeholders. Never quote placeholders — they are auto shell-escaped. Never prefix with \`cd\` — the caller controls cwd. Prefer long flags when the short form is ambiguous or obscure.
 - description: one sentence explaining what the tool does.
@@ -53,8 +62,11 @@ export async function draftToolDefinition(
   auth: { apiKey: string; headers?: Record<string, string> },
   input: DraftInput,
   signal?: AbortSignal,
-): Promise<DraftOutput> {
-  const userMessage = `Command: ${input.command}${input.usage ? `\nUsage: ${input.usage}` : ""}`;
+): Promise<DraftOutput | DraftRejection> {
+  let userMessage = `Command: ${input.command}\nReasoning: ${input.reasoning}`;
+  if (input.context) {
+    userMessage += `\n\nContext:\n${input.context}`;
+  }
 
   // Use streamSimple and collect all text
   let text = "";
@@ -83,6 +95,12 @@ export async function draftToolDefinition(
     const parsed = JSON.parse(cleaned) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
+
+      // Check if the model rejected the request
+      if (obj.rejected === true) {
+        return { rejected: true, reason: typeof obj.reason === "string" ? obj.reason : "" };
+      }
+
       return {
         name: typeof obj.name === "string" ? obj.name : deriveNameFromCommand(input.command),
         command: typeof obj.command === "string" ? obj.command : input.command,
@@ -125,6 +143,11 @@ Placeholder syntax in the command field:
 - {{...name?}} — optional variadic (omitted when not provided)
 
 Never quote placeholders — they are auto shell-escaped.
+
+Parameterization:
+- Do extract: identifiers, messages, branch/tag names, env names, numeric arguments (counts, limits, line numbers, ports, timeouts).
+- Do NOT extract: the binary/app name, URL schemes (http/https), fixed flags that define the tool's purpose, or structural constants.
+- Use disambiguating names when multiple similar params exist ({{target_branch}} vs {{source_branch}}).
 
 Reply with ONLY a JSON object.`;
 
