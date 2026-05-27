@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
-import { registerArmoryTool } from "../src/register-tool.js";
+import { interpolateCommand, registerArmoryTool } from "../src/register-tool.js";
 
 vi.mock("../src/executor.js");
 
@@ -413,5 +413,85 @@ describe("registerArmoryTool — parameter interpolation", () => {
     // Optional array param — TypeBox wraps Optional by removing from required, and Array has type=array + items
     expect(props?.optional?.type).toBe("array");
     expect(props?.optional?.items).toBeDefined();
+  });
+
+  it("handles template syntax {{...fields?}} for variadic optional via paramDefs", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "template-syntax",
+      command: "bash script.sh {{key}} {{...fields?}}",
+      description: "Test template syntax",
+      parameters: {
+        key: { type: "string", description: "Key" },
+        fields: { type: "string[]", description: "Fields", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    // With fields provided
+    await execute("call-1", { key: "ABC-1", fields: ["a", "b"] }, new AbortController().signal, undefined, makeCtx());
+    expect(mockExecuteCommand).toHaveBeenCalledWith("bash script.sh 'ABC-1' 'a' 'b'", expect.objectContaining({}));
+  });
+
+  it("handles template syntax {{...fields?}} with fields omitted", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "template-omit",
+      command: "bash script.sh {{key}} {{...fields?}}",
+      description: "Test template syntax",
+      parameters: {
+        key: { type: "string", description: "Key" },
+        fields: { type: "string[]", description: "Fields", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { key: "ABC-1" }, new AbortController().signal, undefined, makeCtx());
+    expect(mockExecuteCommand).toHaveBeenCalledWith("bash script.sh 'ABC-1'", expect.objectContaining({}));
+  });
+
+  it("interpolateCommand detects variadic from template syntax without paramDefs", () => {
+    const result = interpolateCommand("run {{...args}}", { args: ["a", "b", "c"] });
+    expect(result).toBe("run 'a' 'b' 'c'");
+  });
+
+  it("interpolateCommand detects optional from template syntax without paramDefs", () => {
+    const result = interpolateCommand("run {{key}} {{suffix?}}", { key: "hello" });
+    expect(result).toBe("run 'hello'");
+  });
+
+  it("handles quoted placeholder with variadic modifier", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "quoted-variadic",
+      command: 'run "{{...args}}"',
+      description: "Test quoted variadic",
+      parameters: {
+        args: { type: "string[]", description: "Arguments" },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { args: ["x", "y"] }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("run 'x' 'y'", expect.objectContaining({}));
+  });
+
+  it("handles quoted placeholder with optional modifier", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "quoted-optional",
+      command: "run {{key}} '{{suffix?}}'",
+      description: "Test quoted optional",
+      parameters: {
+        key: { type: "string", description: "Key" },
+        suffix: { type: "string", description: "Suffix", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { key: "hello" }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("run 'hello'", expect.objectContaining({}));
   });
 });

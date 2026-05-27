@@ -43,23 +43,32 @@
 
 ## Parameters
 
-Tools can declare named parameters with `parameters: Record<string, { type: "string" | "string[]"; description?: string; optional?: boolean }>`. The command string uses `{{paramName}}` placeholders. At execution time, each placeholder is replaced with the shell-escaped value (`'value'`, with internal single quotes escaped as `'\''`).
+Tools can declare named parameters with `parameters: Record<string, { type: "string" | "string[]"; description?: string; optional?: boolean }>`. The command string uses `{{paramName}}` placeholders with optional modifier syntax.
 
-### Parameter types
+### Template syntax
 
-- `type: "string"` (default) — single value, shell-escaped as one argument
-- `type: "string[]"` — array of values, each element shell-escaped individually and joined with spaces. The LLM sees this as `Type.Array(Type.String())` and passes an array like `["summary", "status"]`.
+Type and optionality are expressed directly in the command template:
 
-### Optional parameters
+- `{{name}}` — required string
+- `{{name?}}` — optional string (omitted from command when not provided)
+- `{{...name}}` — required variadic (`string[]`, each element becomes a separate shell-escaped arg)
+- `{{...name?}}` — optional variadic (omitted when not provided)
 
-Parameters with `optional: true` can be omitted by the agent. When omitted, the `{{param}}` placeholder is removed from the command and surrounding whitespace is collapsed. Missing required parameters (default) throw an error.
+The `type` and `optional` fields in the JSON config are derived from template syntax when the tool is saved. Existing tools with explicit config fields (no template modifiers) continue to work via fallback.
+
+### Validation
+
+Parameters are validated with TypeBox before interpolation:
+- Required params must be present
+- All params enforce `minLength: 1` (strings) / `minItems: 1` (arrays) — if you provide a value, it must have content
+- Omit the key entirely to skip an optional param
 
 ### Example
 
 ```json
 {
   "name": "search",
-  "command": "grep -C {{context}} {{pattern}} {{paths}}",
+  "command": "grep -C {{context}} {{pattern}} {{...paths?}}",
   "parameters": {
     "context": { "type": "string", "description": "Context lines" },
     "pattern": { "type": "string", "description": "Search pattern" },

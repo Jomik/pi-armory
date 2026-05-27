@@ -27,8 +27,14 @@ Fields:
 - description: one sentence explaining what the tool does.
 - requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
 - guidelines: ultra-short hints (≤8 words each). Only if genuinely non-obvious; prefer [].
-- parameters: { "name": { "description": "..." } } for each {{placeholder}}. {} if none.
+- parameters: { "name": { "description": "..." } } for each {{placeholder}}. {} if none. Do NOT include type/optional here — those are expressed via placeholder syntax.
 - destination: "global" for general-purpose tools usable in any project, "project" for repo-specific scripts/conventions.
+
+Placeholder syntax:
+- {{name}} — required single value (type "string")
+- {{name?}} — optional single value (omitted from command when not provided)
+- {{...name}} — required variadic (type "string[]", expands to multiple shell-escaped args)
+- {{...name?}} — optional variadic (omitted when not provided)
 
 Parameterization:
 The goal is a reusable tool. Extract anything the calling agent might need or want to change between invocations. Keep hardcoded anything that defines the tool's identity and is unlikely to change.
@@ -37,9 +43,10 @@ The goal is a reusable tool. Extract anything the calling agent might need or wa
 - Use disambiguating names when multiple similar params exist ({{target_branch}} vs {{source_branch}}). Single params can be simple ({{branch}}).
 - Examples of correct parameterization:
   - tail -20 file.log → tail -{{lines}} file.log
-  - grep -C 3 "error" src/ → grep -C {{context_lines}} {{pattern}} src/
+  - grep -C 3 "error" src/ → grep -C {{context_lines}} {{pattern}} {{...paths?}}
   - curl http://localhost:3000/api → curl http://localhost:{{port}}/{{endpoint}}
   - head -n 50 → head -n {{lines}}
+  - script.sh KEY field1 field2 → script.sh {{key}} {{...fields?}}
 
 Reply with ONLY a JSON object.`;
 
@@ -113,7 +120,17 @@ export interface ReviseInput {
 
 const REVISE_PROMPT = `You are improving an existing tool definition for a coding agent's armory.
 Given the current definition and an optional instruction, produce an improved version.
-Follow the same field rules as the original (snake_case name, {{placeholders}} for varying values, no cd, etc.).
+Follow the same field rules as the original (snake_case name, no cd, etc.).
+
+Placeholder syntax in the command field:
+- {{name}} — required single value
+- {{name?}} — optional single value (omitted from command when not provided)
+- {{...name}} — required variadic (expands to multiple shell-escaped args)
+- {{...name?}} — optional variadic (omitted when not provided)
+
+Never quote placeholders — they are auto shell-escaped.
+The parameters field should only contain { "name": { "description": "..." } } — type/optional are expressed via placeholder syntax.
+
 Reply with ONLY a JSON object.`;
 
 export async function reviseDraftDefinition(

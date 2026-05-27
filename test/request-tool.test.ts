@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPlaceholders, normalizeName, VALID_NAME } from "../src/request-tool.js";
+import { parsePlaceholders } from "../src/shared.js";
 
 describe("extractPlaceholders", () => {
   it("returns empty array for a command with no placeholders", () => {
@@ -20,6 +21,53 @@ describe("extractPlaceholders", () => {
 
   it("still extracts inner word from nested/malformed triple braces", () => {
     expect(extractPlaceholders("{{{foo}}}")).toEqual(["foo"]);
+  });
+
+  it("extracts names from variadic/optional placeholders", () => {
+    expect(extractPlaceholders("run {{key}} {{...fields?}}")).toEqual(["key", "fields"]);
+  });
+});
+
+describe("parsePlaceholders", () => {
+  it("parses plain placeholder as required string", () => {
+    expect(parsePlaceholders("echo {{name}}")).toEqual([{ name: "name", variadic: false, optional: false }]);
+  });
+
+  it("parses optional placeholder", () => {
+    expect(parsePlaceholders("echo {{name?}}")).toEqual([{ name: "name", variadic: false, optional: true }]);
+  });
+
+  it("parses variadic placeholder", () => {
+    expect(parsePlaceholders("run {{...args}}")).toEqual([{ name: "args", variadic: true, optional: false }]);
+  });
+
+  it("parses variadic optional placeholder", () => {
+    expect(parsePlaceholders("run {{...args?}}")).toEqual([{ name: "args", variadic: true, optional: true }]);
+  });
+
+  it("parses mixed placeholders", () => {
+    expect(parsePlaceholders("cmd {{key}} {{...fields?}}")).toEqual([
+      { name: "key", variadic: false, optional: false },
+      { name: "fields", variadic: true, optional: true },
+    ]);
+  });
+
+  it("deduplicates by name", () => {
+    expect(parsePlaceholders("cp {{file}} {{file}}")).toEqual([{ name: "file", variadic: false, optional: false }]);
+  });
+
+  it("throws on conflicting modifiers for same name", () => {
+    expect(() => parsePlaceholders("run {{args}} {{...args}}")).toThrow("Conflicting modifiers for placeholder: args");
+  });
+
+  it("throws on conflicting optional modifier for same name", () => {
+    expect(() => parsePlaceholders("run {{name}} {{name?}}")).toThrow("Conflicting modifiers for placeholder: name");
+  });
+
+  it("allows identical duplicate modifiers", () => {
+    expect(parsePlaceholders("run {{...args?}} and {{...args?}}")).toEqual([
+      { name: "args", variadic: true, optional: true },
+    ]);
   });
 });
 

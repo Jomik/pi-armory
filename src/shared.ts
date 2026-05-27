@@ -4,9 +4,33 @@ import type { ArmoryTool } from "./config.js";
 import { reviseDraftDefinition } from "./draft.js";
 import type { ToolFormResult } from "./tool-form.js";
 
+export interface PlaceholderInfo {
+  name: string;
+  variadic: boolean;
+  optional: boolean;
+}
+
 export function extractPlaceholders(command: string): string[] {
-  const matches = command.matchAll(/\{\{(\w+)\}\}/g);
-  return [...new Set([...matches].map((m) => m[1]))];
+  return parsePlaceholders(command).map((p) => p.name);
+}
+
+export function parsePlaceholders(command: string): PlaceholderInfo[] {
+  const matches = command.matchAll(/\{\{(\.\.\.)?([\w]+)(\?)?\}\}/g);
+  const seen = new Map<string, PlaceholderInfo>();
+  for (const m of matches) {
+    const name = m[2];
+    const variadic = m[1] === "...";
+    const optional = m[3] === "?";
+    const existing = seen.get(name);
+    if (existing) {
+      if (existing.variadic !== variadic || existing.optional !== optional) {
+        throw new Error(`Conflicting modifiers for placeholder: ${name}`);
+      }
+      continue;
+    }
+    seen.set(name, { name, variadic, optional });
+  }
+  return [...seen.values()];
 }
 
 export function resolveModel(registry: ModelRegistry, name: string): Model<Api> | undefined {
@@ -65,7 +89,7 @@ export function buildToolFromResult(
     secrets?: Record<string, string>;
   },
 ): ArmoryTool {
-  const placeholders = extractPlaceholders(result.command);
+  const parsed = parsePlaceholders(result.command);
   const descriptions = opts?.parameterDescriptions;
   const types = opts?.parameterTypes;
   return {
@@ -74,15 +98,15 @@ export function buildToolFromResult(
     description: result.description,
     ...(result.requiresApproval ? { requires_approval: true } : {}),
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
-    ...(placeholders.length > 0
+    ...(parsed.length > 0
       ? {
           parameters: Object.fromEntries(
-            placeholders.map((p) => [
-              p,
+            parsed.map((p) => [
+              p.name,
               {
-                type: (types?.[p]?.type ?? "string") as "string" | "string[]",
-                description: descriptions?.[p],
-                ...(types?.[p]?.optional ? { optional: true } : {}),
+                type: p.variadic ? "string[]" : (types?.[p.name]?.type ?? "string"),
+                description: descriptions?.[p.name],
+                ...(p.optional || types?.[p.name]?.optional ? { optional: true } : {}),
               },
             ]),
           ),
