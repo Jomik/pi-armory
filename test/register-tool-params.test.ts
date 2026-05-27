@@ -160,7 +160,7 @@ describe("registerArmoryTool — parameter interpolation", () => {
     const execute = registerAndCapture(tool);
 
     await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
-      "Missing required parameter: name",
+      "Invalid parameters",
     );
   });
 
@@ -219,5 +219,199 @@ describe("registerArmoryTool — parameter interpolation", () => {
     expect(schema).toBeDefined();
     // No declared properties
     expect(Object.keys(schema.properties ?? {})).toHaveLength(0);
+  });
+
+  it("interpolates string[] parameter as multiple shell-escaped arguments", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "jira-view",
+      command: "bash jira-view.sh {{key}} {{fields}}",
+      description: "View a Jira issue",
+      parameters: {
+        key: { type: "string", description: "Issue key" },
+        fields: { type: "string[]", description: "Fields to display" },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute(
+      "call-1",
+      { key: "PLMA-402", fields: ["summary", "status", "description"] },
+      new AbortController().signal,
+      undefined,
+      makeCtx(),
+    );
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith(
+      "bash jira-view.sh 'PLMA-402' 'summary' 'status' 'description'",
+      expect.objectContaining({}),
+    );
+  });
+
+  it("shell-escapes each element in a string[] parameter", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "multi-arg",
+      command: "run {{args}}",
+      description: "Run with args",
+      parameters: {
+        args: { type: "string[]", description: "Arguments" },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute(
+      "call-1",
+      { args: ["hello world", "it's here", "foo;bar"] },
+      new AbortController().signal,
+      undefined,
+      makeCtx(),
+    );
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith(
+      "run 'hello world' 'it'\\''s here' 'foo;bar'",
+      expect.objectContaining({}),
+    );
+  });
+
+  it("omits optional parameter when not provided", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "jira-view",
+      command: "bash jira-view.sh {{key}} {{fields}}",
+      description: "View a Jira issue",
+      parameters: {
+        key: { type: "string", description: "Issue key" },
+        fields: { type: "string[]", description: "Fields to display", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { key: "PLMA-402" }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("bash jira-view.sh 'PLMA-402'", expect.objectContaining({}));
+  });
+
+  it("omits optional string parameter when not provided", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "greet",
+      command: "echo {{name}} {{suffix}}",
+      description: "Greet",
+      parameters: {
+        name: { type: "string", description: "Name" },
+        suffix: { type: "string", description: "Optional suffix", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute("call-1", { name: "world" }, new AbortController().signal, undefined, makeCtx());
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith("echo 'world'", expect.objectContaining({}));
+  });
+
+  it("includes optional parameter when provided", async () => {
+    mockExecuteCommand.mockResolvedValue("ok");
+    const tool: ArmoryTool = {
+      name: "jira-view",
+      command: "bash jira-view.sh {{key}} {{fields}}",
+      description: "View a Jira issue",
+      parameters: {
+        key: { type: "string", description: "Issue key" },
+        fields: { type: "string[]", description: "Fields to display", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await execute(
+      "call-1",
+      { key: "PLMA-402", fields: ["summary", "status"] },
+      new AbortController().signal,
+      undefined,
+      makeCtx(),
+    );
+
+    expect(mockExecuteCommand).toHaveBeenCalledWith(
+      "bash jira-view.sh 'PLMA-402' 'summary' 'status'",
+      expect.objectContaining({}),
+    );
+  });
+
+  it("still throws for missing required parameters", async () => {
+    const tool: ArmoryTool = {
+      name: "required",
+      command: "echo {{name}} {{optional}}",
+      description: "Test",
+      parameters: {
+        name: { type: "string", description: "Required name" },
+        optional: { type: "string", description: "Optional", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+      "Invalid parameters",
+    );
+  });
+
+  it("throws for required string[] when empty array is passed", async () => {
+    const tool: ArmoryTool = {
+      name: "required-array",
+      command: "run {{args}}",
+      description: "Test",
+      parameters: {
+        args: { type: "string[]", description: "Required args" },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await expect(execute("call-1", { args: [] }, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+      "Invalid parameters",
+    );
+  });
+
+  it("rejects optional string[] when empty array is passed", async () => {
+    const tool: ArmoryTool = {
+      name: "optional-empty",
+      command: "run {{name}} {{args}}",
+      description: "Test",
+      parameters: {
+        name: { type: "string", description: "Name" },
+        args: { type: "string[]", description: "Optional args", optional: true },
+      },
+    };
+    const execute = registerAndCapture(tool);
+
+    await expect(
+      execute("call-1", { name: "hello", args: [] }, new AbortController().signal, undefined, makeCtx()),
+    ).rejects.toThrow("Invalid parameters");
+  });
+
+  it("registers optional string[] as Type.Optional(Type.Array) in schema", () => {
+    const tool: ArmoryTool = {
+      name: "schema-test",
+      command: "run {{required}} {{optional}}",
+      description: "Test",
+      parameters: {
+        required: { type: "string", description: "Required" },
+        optional: { type: "string[]", description: "Optional array", optional: true },
+      },
+    };
+    let capturedDef: { parameters: { properties?: Record<string, { type?: string; items?: unknown }> } } | undefined;
+    const pi = {
+      registerTool: vi.fn((def: typeof capturedDef) => {
+        capturedDef = def;
+      }),
+    } as unknown as ExtensionAPI;
+
+    registerArmoryTool(pi, tool);
+
+    const props = capturedDef?.parameters?.properties;
+    expect(props).toBeDefined();
+    // Required string param
+    expect(props?.required?.type).toBe("string");
+    // Optional array param — TypeBox wraps Optional by removing from required, and Array has type=array + items
+    expect(props?.optional?.type).toBe("array");
+    expect(props?.optional?.items).toBeDefined();
   });
 });

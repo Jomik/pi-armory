@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { type TObject, Type } from "typebox";
+import { Value } from "typebox/value";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
 import { fetchSecret } from "./keychain.js";
@@ -10,14 +11,52 @@ function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-export function interpolateCommand(command: string, params: Record<string, unknown>): string {
-  return command.replace(/(["'])\{\{(\w+)\}\}\1|\{\{(\w+)\}\}/g, (_match, _quote, quotedKey, bareKey) => {
+export function interpolateCommand(
+  command: string,
+  params: Record<string, unknown>,
+  paramDefs?: Record<string, { type: string; optional?: boolean }>,
+): string {
+  const result = command.replace(/(["'])\{\{(\w+)\}\}\1|\{\{(\w+)\}\}/g, (_match, _quote, quotedKey, bareKey) => {
     const key = quotedKey ?? bareKey;
-    if (!(key in params)) {
+    const def = paramDefs?.[key];
+
+    if (!(key in params) || params[key] === undefined) {
+      if (def?.optional) {
+        return "";
+      }
       throw new Error(`Missing required parameter: ${key}`);
     }
-    return shellEscape(String(params[key]));
+
+    const value = params[key];
+
+    if (def?.type === "string[]" && Array.isArray(value)) {
+      if (value.length === 0) return "";
+      return (value as unknown[]).map((v) => shellEscape(String(v))).join(" ");
+    }
+
+    return shellEscape(String(value));
   });
+
+  // Trim edges (from omitted optional params at start/end of command)
+  return result.trim();
+}
+
+function buildParamSchema(parameters: NonNullable<ArmoryTool["parameters"]>): TObject {
+  return Type.Object(
+    Object.fromEntries(
+      Object.entries(parameters).map(([key, def]) => {
+        const desc = def.description ?? key;
+        let fieldSchema =
+          def.type === "string[]"
+            ? Type.Array(Type.String(), { description: desc, minItems: 1 })
+            : Type.String({ description: desc, minLength: 1 });
+        if (def.optional) {
+          fieldSchema = Type.Optional(fieldSchema);
+        }
+        return [key, fieldSchema];
+      }),
+    ),
+  );
 }
 
 /** Tools with requires_approval, keyed by name. Updated by registerArmoryTool. */
@@ -27,16 +66,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
   }
-  const schema = tool.parameters
-    ? Type.Object(
-        Object.fromEntries(
-          Object.entries(tool.parameters).map(([key, def]) => [
-            key,
-            Type.String({ description: def.description ?? key }),
-          ]),
-        ),
-      )
-    : Type.Object({});
+  const schema = tool.parameters ? buildParamSchema(tool.parameters) : Type.Object({});
 
   pi.registerTool({
     name: tool.name,
@@ -49,7 +79,9 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       let text = theme.fg("toolTitle", theme.bold(`${tool.name} `));
       let cmd: string;
       try {
-        cmd = tool.parameters ? interpolateCommand(tool.command, args as Record<string, unknown>) : tool.command;
+        cmd = tool.parameters
+          ? interpolateCommand(tool.command, args as Record<string, unknown>, tool.parameters)
+          : tool.command;
       } catch {
         // Args still streaming — show template
         cmd = tool.command;
@@ -91,9 +123,18 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
     },
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      // Validate parameters against schema
+      if (tool.parameters) {
+        if (!Value.Check(schema, params)) {
+          const errors = Value.Errors(schema, params);
+          const msg = errors.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("; ");
+          throw new Error(`Invalid parameters: ${msg}`);
+        }
+      }
+
       // Interpolate parameters into the command string
       const command = tool.parameters
-        ? interpolateCommand(tool.command, params as Record<string, unknown>)
+        ? interpolateCommand(tool.command, params as Record<string, unknown>, tool.parameters)
         : tool.command;
 
       // Fetch secrets from keychain and prepare extraEnv / redact
