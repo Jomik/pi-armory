@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { extractPlaceholders } from "./shared.js";
+import { parsePlaceholders } from "./shared.js";
 
 export interface ToolFormState {
   /** Optional title shown at top of form. Defaults to "Request Tool". */
@@ -164,8 +164,17 @@ export function toolFormPanel(
 
       // Parameters (read-only, auto-detected)
       const paramsLabel = "Parameters:".padEnd(LABEL);
-      const placeholders = extractPlaceholders(commandEditor.getText());
-      const paramsText = placeholders.length > 0 ? placeholders.join(", ") : "(none)";
+      const placeholders = parsePlaceholders(commandEditor.getText());
+      const paramsText =
+        placeholders.length > 0
+          ? placeholders
+              .map((p) => {
+                const prefix = p.variadic ? "..." : "";
+                const suffix = p.optional ? "?" : "";
+                return `${prefix}${p.name}${suffix}`;
+              })
+              .join(", ")
+          : "(none)";
       lines.push(` ${theme.fg("muted", paramsLabel)} ${theme.fg("dim", paramsText)}`);
 
       lines.push("");

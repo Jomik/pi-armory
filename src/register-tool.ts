@@ -16,26 +16,30 @@ export function interpolateCommand(
   params: Record<string, unknown>,
   paramDefs?: Record<string, { type: string; optional?: boolean }>,
 ): string {
-  const result = command.replace(/(["'])\{\{(\w+)\}\}\1|\{\{(\w+)\}\}/g, (_match, _quote, quotedKey, bareKey) => {
-    const key = quotedKey ?? bareKey;
-    const def = paramDefs?.[key];
+  const result = command.replace(
+    /(["'])\{\{(\.\.\.)?([\w]+)(\?)?\}\}\1|\{\{(\.\.\.)?([\w]+)(\?)?\}\}/g,
+    (_match, _quote, quotedSpread, quotedKey, quotedOpt, bareSpread, bareKey, bareOpt) => {
+      const key = quotedKey ?? bareKey;
+      const isVariadic = (quotedSpread ?? bareSpread) === "..." || paramDefs?.[key]?.type === "string[]";
+      const isOptional = (quotedOpt ?? bareOpt) === "?" || paramDefs?.[key]?.optional === true;
 
-    if (!(key in params) || params[key] === undefined) {
-      if (def?.optional) {
-        return "";
+      if (!(key in params) || params[key] === undefined) {
+        if (isOptional) {
+          return "";
+        }
+        throw new Error(`Missing required parameter: ${key}`);
       }
-      throw new Error(`Missing required parameter: ${key}`);
-    }
 
-    const value = params[key];
+      const value = params[key];
 
-    if (def?.type === "string[]" && Array.isArray(value)) {
-      if (value.length === 0) return "";
-      return (value as unknown[]).map((v) => shellEscape(String(v))).join(" ");
-    }
+      if (isVariadic && Array.isArray(value)) {
+        if (value.length === 0) return "";
+        return (value as unknown[]).map((v) => shellEscape(String(v))).join(" ");
+      }
 
-    return shellEscape(String(value));
-  });
+      return shellEscape(String(value));
+    },
+  );
 
   // Trim edges (from omitted optional params at start/end of command)
   return result.trim();
