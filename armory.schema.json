@@ -54,11 +54,22 @@
                 ],
                 "properties": {
                   "type": {
-                    "type": "string",
-                    "const": "string"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "string"
+                      },
+                      {
+                        "type": "string",
+                        "const": "string[]"
+                      }
+                    ]
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "optional": {
+                    "type": "boolean"
                   }
                 }
               }

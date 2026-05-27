@@ -141,7 +141,10 @@ async function handleEdit(
   const parameterDescriptions = tool.parameters
     ? Object.fromEntries(Object.entries(tool.parameters).map(([k, v]) => [k, v.description]))
     : undefined;
-  const updatedTool = buildToolFromResult(result, { parameterDescriptions, secrets: tool.secrets });
+  const parameterTypes = tool.parameters
+    ? Object.fromEntries(Object.entries(tool.parameters).map(([k, v]) => [k, { type: v.type, optional: v.optional }]))
+    : undefined;
+  const updatedTool = buildToolFromResult(result, { parameterDescriptions, parameterTypes, secrets: tool.secrets });
 
   // Save to new (or same) destination
   await saveConfig(updatedTool, result.destination, deps.projectRoot);

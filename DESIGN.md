@@ -43,7 +43,35 @@
 
 ## Parameters
 
-Tools can declare named parameters with `parameters: Record<string, { type: "string"; description: string }>`. The command string uses `{{paramName}}` placeholders. At execution time, each placeholder is replaced with the shell-escaped value (`'value'`, with internal single quotes escaped as `'\''`). All declared parameters are required — missing parameters throw an error. This approach prevents injection by containing every value in single quotes regardless of its content.
+Tools can declare named parameters with `parameters: Record<string, { type: "string" | "string[]"; description?: string; optional?: boolean }>`. The command string uses `{{paramName}}` placeholders. At execution time, each placeholder is replaced with the shell-escaped value (`'value'`, with internal single quotes escaped as `'\''`).
+
+### Parameter types
+
+- `type: "string"` (default) — single value, shell-escaped as one argument
+- `type: "string[]"` — array of values, each element shell-escaped individually and joined with spaces. The LLM sees this as `Type.Array(Type.String())` and passes an array like `["summary", "status"]`.
+
+### Optional parameters
+
+Parameters with `optional: true` can be omitted by the agent. When omitted, the `{{param}}` placeholder is removed from the command and surrounding whitespace is collapsed. Missing required parameters (default) throw an error.
+
+### Example
+
+```json
+{
+  "name": "search",
+  "command": "grep -C {{context}} {{pattern}} {{paths}}",
+  "parameters": {
+    "context": { "type": "string", "description": "Context lines" },
+    "pattern": { "type": "string", "description": "Search pattern" },
+    "paths": { "type": "string[]", "description": "Files to search", "optional": true }
+  }
+}
+```
+
+With `context="3"`, `pattern="error"`, `paths=["src/", "lib/"]`: `grep -C '3' 'error' 'src/' 'lib/'`
+With `context="3"`, `pattern="error"`, paths omitted: `grep -C '3' 'error'`
+
+This approach prevents injection by containing every value in single quotes regardless of its content.
 
 ## Secrets
 

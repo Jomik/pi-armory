@@ -61,11 +61,13 @@ export function buildToolFromResult(
   result: ToolFormResult,
   opts?: {
     parameterDescriptions?: Record<string, string | undefined>;
+    parameterTypes?: Record<string, { type: "string" | "string[]"; optional?: boolean }>;
     secrets?: Record<string, string>;
   },
 ): ArmoryTool {
   const placeholders = extractPlaceholders(result.command);
   const descriptions = opts?.parameterDescriptions;
+  const types = opts?.parameterTypes;
   return {
     name: result.name,
     command: result.command,
@@ -75,7 +77,14 @@ export function buildToolFromResult(
     ...(placeholders.length > 0
       ? {
           parameters: Object.fromEntries(
-            placeholders.map((p) => [p, { type: "string" as const, description: descriptions?.[p] }]),
+            placeholders.map((p) => [
+              p,
+              {
+                type: (types?.[p]?.type ?? "string") as "string" | "string[]",
+                description: descriptions?.[p],
+                ...(types?.[p]?.optional ? { optional: true } : {}),
+              },
+            ]),
           ),
         }
       : {}),
