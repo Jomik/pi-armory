@@ -128,10 +128,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
-      const parameterDescriptions = drafted?.parameters
-        ? Object.fromEntries(Object.entries(drafted.parameters).map(([k, v]) => [k, v.description]))
-        : undefined;
-      const tool = buildToolFromResult({ ...result, name }, { parameterDescriptions });
+      const tool = buildToolFromResult({ ...result, name });
 
       await saveConfig(tool, result.destination, projectRoot);
       registerArmoryTool(pi, tool);

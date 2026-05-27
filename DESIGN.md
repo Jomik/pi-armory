@@ -28,7 +28,7 @@
 
 ## Key decisions
 
-- Commands support `{{paramName}}` template placeholders; parameters are declared in the tool config and shell-escaped before interpolation
+- Commands support `{{paramName}}` template placeholders with modifiers (`{{...name?}}`); type and optionality are expressed inline and shell-escaped before interpolation
 - Separate config file (not in pi settings.json), consistent with pi-imps/pi-errands/pi-inquisitor
 - `checks` is just another tool in the armory (e.g. `{ "name": "checks", "command": "npm test && npm run typecheck" }`)
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
@@ -43,25 +43,16 @@
 
 ## Parameters
 
-Tools can declare named parameters with `parameters: Record<string, { type: "string" | "string[]"; description?: string; optional?: boolean }>`. The command string uses `{{paramName}}` placeholders with optional modifier syntax.
+Parameters are declared entirely via command template syntax — no separate config field needed.
 
 ### Template syntax
-
-Type and optionality are expressed directly in the command template:
 
 - `{{name}}` — required string
 - `{{name?}}` — optional string (omitted from command when not provided)
 - `{{...name}}` — required variadic (`string[]`, each element becomes a separate shell-escaped arg)
 - `{{...name?}}` — optional variadic (omitted when not provided)
 
-The `type` and `optional` fields in the JSON config are derived from template syntax when the tool is saved. Existing tools with explicit config fields (no template modifiers) continue to work via fallback.
-
-### Validation
-
-Parameters are validated with TypeBox before interpolation:
-- Required params must be present
-- All params enforce `minLength: 1` (strings) / `minItems: 1` (arrays) — if you provide a value, it must have content
-- Omit the key entirely to skip an optional param
+At execution time, values are validated with TypeBox (`minLength: 1` for strings, `minItems: 1` for arrays). If you provide a value, it must have content; omit the key entirely to skip an optional param.
 
 ### Example
 
@@ -69,11 +60,7 @@ Parameters are validated with TypeBox before interpolation:
 {
   "name": "search",
   "command": "grep -C {{context}} {{pattern}} {{...paths?}}",
-  "parameters": {
-    "context": { "type": "string", "description": "Context lines" },
-    "pattern": { "type": "string", "description": "Search pattern" },
-    "paths": { "type": "string[]", "description": "Files to search", "optional": true }
-  }
+  "description": "Search files for a pattern"
 }
 ```
 

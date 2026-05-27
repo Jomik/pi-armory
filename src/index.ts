@@ -36,9 +36,7 @@ const factory: ExtensionFactory = async (pi) => {
     const tool = approvalRegistry.get(event.toolName);
     if (!tool) return;
 
-    const command = tool.parameters
-      ? interpolateCommand(tool.command, event.input as Record<string, unknown>, tool.parameters)
-      : tool.command;
+    const command = interpolateCommand(tool.command, event.input as Record<string, unknown>);
 
     const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
     if (!approved) {

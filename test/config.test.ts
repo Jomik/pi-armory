@@ -293,11 +293,10 @@ describe("schema validation", () => {
   it("accepts valid config with all optional fields", async () => {
     const tool = {
       name: "full",
-      command: "echo full",
+      command: "echo full {{arg}}",
       description: "Full tool",
       requires_approval: true,
       guidelines: ["Be careful"],
-      parameters: { arg: { type: "string", description: "An arg" } },
       secrets: { API_KEY: "keychain:api-key" },
     };
     await writeGlobal([tool as ArmoryTool]);

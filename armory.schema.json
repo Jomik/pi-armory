@@ -44,37 +44,6 @@
               "type": "string"
             }
           },
-          "parameters": {
-            "type": "object",
-            "patternProperties": {
-              "^.*$": {
-                "type": "object",
-                "required": [
-                  "type"
-                ],
-                "properties": {
-                  "type": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "const": "string"
-                      },
-                      {
-                        "type": "string",
-                        "const": "string[]"
-                      }
-                    ]
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "optional": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          },
           "secrets": {
             "type": "object",
             "patternProperties": {

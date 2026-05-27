@@ -6,22 +6,19 @@ import { Value } from "typebox/value";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
 import { fetchSecret } from "./keychain.js";
+import { parsePlaceholders } from "./shared.js";
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-export function interpolateCommand(
-  command: string,
-  params: Record<string, unknown>,
-  paramDefs?: Record<string, { type: string; optional?: boolean }>,
-): string {
+export function interpolateCommand(command: string, params: Record<string, unknown>): string {
   const result = command.replace(
     /(["'])\{\{(\.\.\.)?([\w]+)(\?)?\}\}\1|\{\{(\.\.\.)?([\w]+)(\?)?\}\}/g,
     (_match, _quote, quotedSpread, quotedKey, quotedOpt, bareSpread, bareKey, bareOpt) => {
       const key = quotedKey ?? bareKey;
-      const isVariadic = (quotedSpread ?? bareSpread) === "..." || paramDefs?.[key]?.type === "string[]";
-      const isOptional = (quotedOpt ?? bareOpt) === "?" || paramDefs?.[key]?.optional === true;
+      const isVariadic = (quotedSpread ?? bareSpread) === "...";
+      const isOptional = (quotedOpt ?? bareOpt) === "?";
 
       if (!(key in params) || params[key] === undefined) {
         if (isOptional) {
@@ -45,19 +42,20 @@ export function interpolateCommand(
   return result.trim();
 }
 
-function buildParamSchema(parameters: NonNullable<ArmoryTool["parameters"]>): TObject {
+function buildParamSchema(tool: ArmoryTool): TObject {
+  const parsed = parsePlaceholders(tool.command);
+  if (parsed.length === 0) return Type.Object({});
+
   return Type.Object(
     Object.fromEntries(
-      Object.entries(parameters).map(([key, def]) => {
-        const desc = def.description ?? key;
-        let fieldSchema =
-          def.type === "string[]"
-            ? Type.Array(Type.String(), { description: desc, minItems: 1 })
-            : Type.String({ description: desc, minLength: 1 });
-        if (def.optional) {
+      parsed.map((p) => {
+        let fieldSchema = p.variadic
+          ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
+          : Type.String({ description: p.name, minLength: 1 });
+        if (p.optional) {
           fieldSchema = Type.Optional(fieldSchema);
         }
-        return [key, fieldSchema];
+        return [p.name, fieldSchema];
       }),
     ),
   );
@@ -70,7 +68,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
   }
-  const schema = tool.parameters ? buildParamSchema(tool.parameters) : Type.Object({});
+  const schema = buildParamSchema(tool);
 
   pi.registerTool({
     name: tool.name,
@@ -83,9 +81,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       let text = theme.fg("toolTitle", theme.bold(`${tool.name} `));
       let cmd: string;
       try {
-        cmd = tool.parameters
-          ? interpolateCommand(tool.command, args as Record<string, unknown>, tool.parameters)
-          : tool.command;
+        cmd = interpolateCommand(tool.command, args as Record<string, unknown>);
       } catch {
         // Args still streaming — show template
         cmd = tool.command;
@@ -128,18 +124,14 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Validate parameters against schema
-      if (tool.parameters) {
-        if (!Value.Check(schema, params)) {
-          const errors = Value.Errors(schema, params);
-          const msg = errors.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("; ");
-          throw new Error(`Invalid parameters: ${msg}`);
-        }
+      if (!Value.Check(schema, params)) {
+        const errors = Value.Errors(schema, params);
+        const msg = errors.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("; ");
+        throw new Error(`Invalid parameters: ${msg}`);
       }
 
       // Interpolate parameters into the command string
-      const command = tool.parameters
-        ? interpolateCommand(tool.command, params as Record<string, unknown>, tool.parameters)
-        : tool.command;
+      const command = interpolateCommand(tool.command, params as Record<string, unknown>);
 
       // Fetch secrets from keychain and prepare extraEnv / redact
       let extraEnv: Record<string, string> | undefined;

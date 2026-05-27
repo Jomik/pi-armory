@@ -26,7 +26,6 @@ const approvalTool: ArmoryTool = {
   command: "rm -rf {{path}}",
   description: "Dangerous",
   requires_approval: true,
-  parameters: { path: { type: "string", description: "Path" } },
 };
 
 // Minimal fake pi context — factory only passes it through to register functions
