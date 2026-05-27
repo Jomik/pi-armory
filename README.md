@@ -47,20 +47,22 @@ Tools are defined in `.pi/armory.json` (project-local) or `~/.pi/agent/armory.js
 
 ### Parameters
 
-Declare named parameters in the tool config; use `{{paramName}}` in the command string:
+Parameters are declared via template syntax in the command string:
+
+- `{{name}}` — required string
+- `{{name?}}` — optional string (omitted when not provided)
+- `{{...name}}` — required variadic (expands to multiple shell-escaped args)
+- `{{...name?}}` — optional variadic
 
 ```json
 {
   "name": "test_file",
   "command": "npm test -- {{file}}",
-  "description": "Run tests for a specific file",
-  "parameters": {
-    "file": { "type": "string", "description": "Path to the test file" }
-  }
+  "description": "Run tests for a specific file"
 }
 ```
 
-All declared parameters are required. Values are shell-escaped before substitution.
+Values are shell-escaped before substitution. No separate `parameters` config field is needed.
 
 ### Bootstrapping
 

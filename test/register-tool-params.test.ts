@@ -47,7 +47,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "greet",
       command: "echo {{name}}",
       description: "Greet someone",
-      parameters: { name: { type: "string", description: "Name to greet" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -62,10 +61,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "copy",
       command: "cp {{src}} {{dst}}",
       description: "Copy a file",
-      parameters: {
-        src: { type: "string", description: "Source path" },
-        dst: { type: "string", description: "Destination path" },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -80,7 +75,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "echo-path",
       command: "echo {{path}}",
       description: "Echo a path",
-      parameters: { path: { type: "string", description: "A file path" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -95,7 +89,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "echo-val",
       command: "echo {{val}}",
       description: "Echo a value",
-      parameters: { val: { type: "string", description: "A value" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -110,7 +103,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "echo-semi",
       command: "echo {{val}}",
       description: "Echo",
-      parameters: { val: { type: "string", description: "A value" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -126,7 +118,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "describe",
       command: 'jj describe -m "{{message}}"',
       description: "Describe a commit",
-      parameters: { message: { type: "string", description: "Commit message" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -141,7 +132,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "echo",
       command: "echo '{{msg}}'",
       description: "Echo",
-      parameters: { msg: { type: "string", description: "Message" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -155,7 +145,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "missing-param",
       command: "echo {{name}}",
       description: "Echo name",
-      parameters: { name: { type: "string", description: "Name" } },
     };
     const execute = registerAndCapture(tool);
 
@@ -183,7 +172,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "typed-tool",
       command: "run {{target}}",
       description: "Run target",
-      parameters: { target: { type: "string", description: "The target to run" } },
     };
     let capturedDef: { parameters: unknown } | undefined;
     const pi = {
@@ -194,7 +182,7 @@ describe("registerArmoryTool — parameter interpolation", () => {
 
     registerArmoryTool(pi, tool);
 
-    // Schema should have a 'target' property (TypeBox object)
+    // Schema should have a 'target' property derived from the command template
     const schema = capturedDef?.parameters as { properties?: Record<string, unknown> };
     expect(schema).toBeDefined();
     expect(schema.properties).toHaveProperty("target");
@@ -225,12 +213,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
     mockExecuteCommand.mockResolvedValue("ok");
     const tool: ArmoryTool = {
       name: "jira-view",
-      command: "bash jira-view.sh {{key}} {{fields}}",
+      command: "bash jira-view.sh {{key}} {{...fields}}",
       description: "View a Jira issue",
-      parameters: {
-        key: { type: "string", description: "Issue key" },
-        fields: { type: "string[]", description: "Fields to display" },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -252,11 +236,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
     mockExecuteCommand.mockResolvedValue("ok");
     const tool: ArmoryTool = {
       name: "multi-arg",
-      command: "run {{args}}",
+      command: "run {{...args}}",
       description: "Run with args",
-      parameters: {
-        args: { type: "string[]", description: "Arguments" },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -278,12 +259,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
     mockExecuteCommand.mockResolvedValue("ok");
     const tool: ArmoryTool = {
       name: "jira-view",
-      command: "bash jira-view.sh {{key}} {{fields}}",
+      command: "bash jira-view.sh {{key}} {{...fields?}}",
       description: "View a Jira issue",
-      parameters: {
-        key: { type: "string", description: "Issue key" },
-        fields: { type: "string[]", description: "Fields to display", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -296,12 +273,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
     mockExecuteCommand.mockResolvedValue("ok");
     const tool: ArmoryTool = {
       name: "greet",
-      command: "echo {{name}} {{suffix}}",
+      command: "echo {{name}} {{suffix?}}",
       description: "Greet",
-      parameters: {
-        name: { type: "string", description: "Name" },
-        suffix: { type: "string", description: "Optional suffix", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -314,12 +287,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
     mockExecuteCommand.mockResolvedValue("ok");
     const tool: ArmoryTool = {
       name: "jira-view",
-      command: "bash jira-view.sh {{key}} {{fields}}",
+      command: "bash jira-view.sh {{key}} {{...fields?}}",
       description: "View a Jira issue",
-      parameters: {
-        key: { type: "string", description: "Issue key" },
-        fields: { type: "string[]", description: "Fields to display", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -340,12 +309,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
   it("still throws for missing required parameters", async () => {
     const tool: ArmoryTool = {
       name: "required",
-      command: "echo {{name}} {{optional}}",
+      command: "echo {{name}} {{optional?}}",
       description: "Test",
-      parameters: {
-        name: { type: "string", description: "Required name" },
-        optional: { type: "string", description: "Optional", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -357,11 +322,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
   it("throws for required string[] when empty array is passed", async () => {
     const tool: ArmoryTool = {
       name: "required-array",
-      command: "run {{args}}",
+      command: "run {{...args}}",
       description: "Test",
-      parameters: {
-        args: { type: "string[]", description: "Required args" },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -373,12 +335,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
   it("rejects optional string[] when empty array is passed", async () => {
     const tool: ArmoryTool = {
       name: "optional-empty",
-      command: "run {{name}} {{args}}",
+      command: "run {{name}} {{...args?}}",
       description: "Test",
-      parameters: {
-        name: { type: "string", description: "Name" },
-        args: { type: "string[]", description: "Optional args", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -390,12 +348,8 @@ describe("registerArmoryTool — parameter interpolation", () => {
   it("registers optional string[] as Type.Optional(Type.Array) in schema", () => {
     const tool: ArmoryTool = {
       name: "schema-test",
-      command: "run {{required}} {{optional}}",
+      command: "run {{required}} {{...optional?}}",
       description: "Test",
-      parameters: {
-        required: { type: "string", description: "Required" },
-        optional: { type: "string[]", description: "Optional array", optional: true },
-      },
     };
     let capturedDef: { parameters: { properties?: Record<string, { type?: string; items?: unknown }> } } | undefined;
     const pi = {
@@ -408,9 +362,9 @@ describe("registerArmoryTool — parameter interpolation", () => {
 
     const props = capturedDef?.parameters?.properties;
     expect(props).toBeDefined();
-    // Required string param
+    // Required string param derived from {{required}}
     expect(props?.required?.type).toBe("string");
-    // Optional array param — TypeBox wraps Optional by removing from required, and Array has type=array + items
+    // Optional array param derived from {{...optional?}} — Array has type=array + items
     expect(props?.optional?.type).toBe("array");
     expect(props?.optional?.items).toBeDefined();
   });
@@ -421,10 +375,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "template-syntax",
       command: "bash script.sh {{key}} {{...fields?}}",
       description: "Test template syntax",
-      parameters: {
-        key: { type: "string", description: "Key" },
-        fields: { type: "string[]", description: "Fields", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -439,10 +389,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "template-omit",
       command: "bash script.sh {{key}} {{...fields?}}",
       description: "Test template syntax",
-      parameters: {
-        key: { type: "string", description: "Key" },
-        fields: { type: "string[]", description: "Fields", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -466,9 +412,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "quoted-variadic",
       command: 'run "{{...args}}"',
       description: "Test quoted variadic",
-      parameters: {
-        args: { type: "string[]", description: "Arguments" },
-      },
     };
     const execute = registerAndCapture(tool);
 
@@ -483,10 +426,6 @@ describe("registerArmoryTool — parameter interpolation", () => {
       name: "quoted-optional",
       command: "run {{key}} '{{suffix?}}'",
       description: "Test quoted optional",
-      parameters: {
-        key: { type: "string", description: "Key" },
-        suffix: { type: "string", description: "Suffix", optional: true },
-      },
     };
     const execute = registerAndCapture(tool);
 

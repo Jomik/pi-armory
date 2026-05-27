@@ -14,7 +14,6 @@ export interface DraftOutput {
   description: string;
   requires_approval: boolean;
   guidelines: string[];
-  parameters: Record<string, { description: string }>;
   destination: "project" | "global";
 }
 
@@ -27,7 +26,6 @@ Fields:
 - description: one sentence explaining what the tool does.
 - requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
 - guidelines: ultra-short hints (≤8 words each). Only if genuinely non-obvious; prefer [].
-- parameters: { "name": { "description": "..." } } for each {{placeholder}}. {} if none. Do NOT include type/optional here — those are expressed via placeholder syntax.
 - destination: "global" for general-purpose tools usable in any project, "project" for repo-specific scripts/conventions.
 
 Placeholder syntax:
@@ -93,7 +91,6 @@ export async function draftToolDefinition(
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : [],
-        parameters: parseParameters(obj.parameters) ?? {},
         destination: obj.destination === "global" ? "global" : "project",
       };
     }
@@ -108,7 +105,6 @@ export async function draftToolDefinition(
     description: input.command,
     requires_approval: false,
     guidelines: [],
-    parameters: {},
     destination: "project",
   };
 }
@@ -129,7 +125,6 @@ Placeholder syntax in the command field:
 - {{...name?}} — optional variadic (omitted when not provided)
 
 Never quote placeholders — they are auto shell-escaped.
-The parameters field should only contain { "name": { "description": "..." } } — type/optional are expressed via placeholder syntax.
 
 Reply with ONLY a JSON object.`;
 
@@ -177,7 +172,6 @@ export async function reviseDraftDefinition(
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : input.current.guidelines,
-        parameters: parseParameters(obj.parameters) ?? input.current.parameters,
         destination: obj.destination === "global" ? "global" : input.current.destination,
       };
     }
@@ -187,24 +181,6 @@ export async function reviseDraftDefinition(
 
   // Fallback: return the current definition unchanged
   return input.current;
-}
-
-export function parseParameters(raw: unknown): Record<string, { description: string }> | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const result: Record<string, { description: string }> = {};
-  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-    if (
-      val &&
-      typeof val === "object" &&
-      "description" in val &&
-      typeof (val as { description: unknown }).description === "string"
-    ) {
-      result[key] = { description: (val as { description: string }).description };
-    } else {
-      result[key] = { description: key };
-    }
-  }
-  return result;
 }
 
 export function deriveNameFromCommand(command: string): string {

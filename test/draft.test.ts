@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DraftOutput, ReviseInput } from "../src/draft.js";
-import { deriveNameFromCommand, parseParameters, reviseDraftDefinition } from "../src/draft.js";
+import { deriveNameFromCommand, reviseDraftDefinition } from "../src/draft.js";
 
 describe("deriveNameFromCommand", () => {
   it("extracts first word from a simple command", () => {
@@ -31,38 +31,6 @@ describe("deriveNameFromCommand", () => {
   });
 });
 
-describe("parseParameters", () => {
-  it("returns undefined for null", () => {
-    expect(parseParameters(null)).toBeUndefined();
-  });
-
-  it("returns undefined for undefined", () => {
-    expect(parseParameters(undefined)).toBeUndefined();
-  });
-
-  it("returns undefined for an array", () => {
-    expect(parseParameters([])).toBeUndefined();
-  });
-
-  it("passes through a valid parameter entry", () => {
-    expect(parseParameters({ file: { description: "A file" } })).toEqual({
-      file: { description: "A file" },
-    });
-  });
-
-  it("falls back to key name when value is an invalid string", () => {
-    expect(parseParameters({ file: "invalid" })).toEqual({
-      file: { description: "file" },
-    });
-  });
-
-  it("falls back to key name when description is missing", () => {
-    expect(parseParameters({ file: {} })).toEqual({
-      file: { description: "file" },
-    });
-  });
-});
-
 describe("reviseDraftDefinition", () => {
   it("is exported as a function", () => {
     expect(typeof reviseDraftDefinition).toBe("function");
@@ -75,7 +43,6 @@ describe("reviseDraftDefinition", () => {
       description: "Run the test suite",
       requires_approval: false,
       guidelines: [],
-      parameters: {},
       destination: "project",
     };
     const input: ReviseInput = { current, instruction: "Add a --watch flag" };
@@ -90,7 +57,6 @@ describe("reviseDraftDefinition", () => {
       description: "Build the project",
       requires_approval: false,
       guidelines: [],
-      parameters: {},
       destination: "global",
     };
     const input: ReviseInput = { current };

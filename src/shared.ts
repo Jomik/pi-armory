@@ -48,11 +48,6 @@ export function makeRedraftCallback(
   return async (current, instruction) => {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) return null;
-    const placeholders = extractPlaceholders(current.command);
-    const adaptedParams: Record<string, { description: string }> = {};
-    for (const p of placeholders) {
-      adaptedParams[p] = { description: p };
-    }
     const revised = await reviseDraftDefinition(
       model,
       { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
@@ -64,7 +59,6 @@ export function makeRedraftCallback(
           guidelines: current.guidelines,
           requires_approval: current.requiresApproval,
           destination: current.destination,
-          parameters: adaptedParams,
         },
         instruction,
       },
@@ -84,34 +78,15 @@ export function makeRedraftCallback(
 export function buildToolFromResult(
   result: ToolFormResult,
   opts?: {
-    parameterDescriptions?: Record<string, string | undefined>;
-    parameterTypes?: Record<string, { type: "string" | "string[]"; optional?: boolean }>;
     secrets?: Record<string, string>;
   },
 ): ArmoryTool {
-  const parsed = parsePlaceholders(result.command);
-  const descriptions = opts?.parameterDescriptions;
-  const types = opts?.parameterTypes;
   return {
     name: result.name,
     command: result.command,
     description: result.description,
     ...(result.requiresApproval ? { requires_approval: true } : {}),
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
-    ...(parsed.length > 0
-      ? {
-          parameters: Object.fromEntries(
-            parsed.map((p) => [
-              p.name,
-              {
-                type: p.variadic ? "string[]" : (types?.[p.name]?.type ?? "string"),
-                description: descriptions?.[p.name],
-                ...(p.optional || types?.[p.name]?.optional ? { optional: true } : {}),
-              },
-            ]),
-          ),
-        }
-      : {}),
     ...(opts?.secrets ? { secrets: opts.secrets } : {}),
   };
 }
