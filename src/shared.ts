@@ -75,6 +75,13 @@ export function makeRedraftCallback(
   };
 }
 
+export function formatParamValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${(value as unknown[]).map(String).join(", ")}]`;
+  }
+  return String(value ?? "");
+}
+
 export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTool, "env" | "secrets">): ArmoryTool {
   return {
     name: result.name,

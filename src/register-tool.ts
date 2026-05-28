@@ -6,7 +6,7 @@ import { Value } from "typebox/value";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
 import { fetchSecret } from "./keychain.js";
-import { parsePlaceholders } from "./shared.js";
+import { formatParamValue, parsePlaceholders } from "./shared.js";
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -131,16 +131,35 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
     promptSnippet: `Runs the command \`${tool.command}\``,
     promptGuidelines: tool.guidelines,
     parameters: schema,
-    renderCall(args, theme, _context) {
-      let text = theme.fg("toolTitle", theme.bold(`${tool.name} `));
-      let cmd: string;
-      try {
-        cmd = interpolateCommand(tool.command, args as Record<string, unknown>);
-      } catch {
-        // Args still streaming — show template
-        cmd = tool.command;
+    renderCall(args, theme, context) {
+      const title = theme.fg("toolTitle", theme.bold(tool.name));
+
+      const entries = Object.entries(args as Record<string, unknown>).filter(([, v]) => v !== undefined);
+      if (entries.length === 0) {
+        return new Text(title, 0, 0);
       }
-      text += theme.fg("accent", cmd);
+
+      let text = title;
+      let anyTruncated = false;
+      const MAX_VALUE_LEN = 57;
+      for (const [key, value] of entries) {
+        const valueStr = formatParamValue(value);
+        if (context.expanded) {
+          text += `\n  ${theme.fg("dim", `${key}:`)} ${theme.fg("accent", valueStr)}`;
+        } else {
+          // Collapse to single line for compact view
+          const singleLine = valueStr.replace(/\n/g, " ");
+          if (singleLine.length > MAX_VALUE_LEN) {
+            anyTruncated = true;
+            text += `\n  ${theme.fg("dim", `${key}:`)} ${theme.fg("accent", `${singleLine.slice(0, MAX_VALUE_LEN)}...`)}`;
+          } else {
+            text += `\n  ${theme.fg("dim", `${key}:`)} ${theme.fg("accent", singleLine)}`;
+          }
+        }
+      }
+      if (!context.expanded && anyTruncated) {
+        text += `${theme.fg("muted", "\n...")} ${keyHint("app.tools.expand", "to expand")}`;
+      }
       return new Text(text, 0, 0);
     },
 
@@ -161,9 +180,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       }
       text += theme.fg("dim", ` (${lines.length} lines)`);
 
-      if (!expanded) {
-        text += theme.fg("muted", ` ${keyHint("app.tools.expand", "to expand")}`);
-      } else {
+      if (expanded) {
         const preview = lines.slice(0, 30);
         for (const line of preview) {
           text += `\n${theme.fg("dim", line)}`;
