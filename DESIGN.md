@@ -69,6 +69,41 @@ With `context="3"`, `pattern="error"`, paths omitted: `grep -C '3' 'error'`
 
 This approach prevents injection by containing every value in single quotes regardless of its content.
 
+## Environment variables
+
+Tools can declare non-secret environment variables via `env: Record<string, string>`. Keys are env var names injected into the subprocess; values are either static strings or `$VAR` references.
+
+```json
+{
+  "name": "deploy",
+  "command": "./deploy.sh",
+  "description": "Deploy",
+  "env": {
+    "SERVER_URL": "https://deploy.example.com",
+    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK",
+    "PRICE": "$$9.99"
+  }
+}
+```
+
+### Value resolution
+
+- Static string (no `$` prefix): injected verbatim
+- `$NAME`: resolved from `process.env[NAME]` at execution time; throws if not set
+- `$$...`: escaped literal — leading `$$` becomes `$` (use for values that start with a dollar sign)
+
+### Visibility
+
+**`env` values are NOT redacted from tool output.** If a resolved value appears in the subprocess's stdout/stderr, it will be visible to the LLM. Do not use `env` for credentials or tokens — use `secrets` instead.
+
+### Interaction with secrets
+
+When both `env` and `secrets` define the same key:
+- The `env` entry is skipped entirely (no resolution, no error if `$VAR` is unset)
+- The `secrets` value wins and is redacted from output
+
+This allows a tool to declare a fallback in `env` that a user can override with a secret without breaking the config.
+
 ## Secrets
 
 Tools can reference secrets via `secrets: Record<string, string>` where keys are environment variable names and values are macOS Keychain account identifiers (stored under service "pi-armory").

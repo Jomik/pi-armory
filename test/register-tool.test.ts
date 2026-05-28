@@ -233,4 +233,139 @@ describe("registerArmoryTool", () => {
       );
     });
   });
+
+  describe("env", () => {
+    const envTool: ArmoryTool = {
+      name: "env-tool",
+      command: "deploy",
+      description: "Deploy with env",
+      env: { JIRA_SERVER: "https://jira.example.com", FORWARD: "$ARMORY_TEST_FWD" },
+    };
+
+    it("passes static env values as extraEnv", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture({
+        name: "static-env",
+        command: "echo hi",
+        description: "test",
+        env: { SERVER: "https://example.com" },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({ SERVER: "https://example.com" });
+    });
+
+    it("resolves $VAR references from process.env", async () => {
+      process.env.ARMORY_TEST_FWD = "forwarded-value";
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(envTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({
+        JIRA_SERVER: "https://jira.example.com",
+        FORWARD: "forwarded-value",
+      });
+      delete process.env.ARMORY_TEST_FWD;
+    });
+
+    it("throws when a $VAR reference is not set in process.env", async () => {
+      delete process.env.ARMORY_TEST_FWD;
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(envTool);
+
+      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        /Environment variable 'ARMORY_TEST_FWD' \(referenced by env\.FORWARD\) is not set/,
+      );
+    });
+
+    it("does not redact env values", async () => {
+      process.env.ARMORY_TEST_FWD = "forwarded-value";
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(envTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.redact).toBeUndefined();
+      delete process.env.ARMORY_TEST_FWD;
+    });
+
+    it("does not set extraEnv when env is empty object", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture({
+        name: "empty-env",
+        command: "echo hi",
+        description: "test",
+        env: {},
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toBeUndefined();
+    });
+
+    it("escapes $$ to a literal dollar sign", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture({
+        name: "escape-tool",
+        command: "echo hi",
+        description: "test",
+        env: { PRICE: "$$9.99", PREFIX: "$$HOME/local" },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({ PRICE: "$9.99", PREFIX: "$HOME/local" });
+    });
+
+    it("skips env keys that secrets also define (secrets win)", async () => {
+      mockFetchSecret.mockImplementation(async (account) => `secret-${account}`);
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture({
+        name: "overlap-tool",
+        command: "deploy",
+        description: "test",
+        env: { SERVER: "https://example.com", TOKEN: "$NONEXISTENT_VAR" },
+        secrets: { TOKEN: "token-account" },
+      });
+
+      // Should NOT throw despite $NONEXISTENT_VAR being unset,
+      // because TOKEN is skipped (secrets take precedence)
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({
+        SERVER: "https://example.com",
+        TOKEN: "secret-token-account",
+      });
+      expect(opts?.redact).toContain("secret-token-account");
+    });
+
+    it("merges env and secrets into extraEnv with secrets winning on conflict", async () => {
+      mockFetchSecret.mockImplementation(async (account) => `secret-${account}`);
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture({
+        name: "both-tool",
+        command: "deploy",
+        description: "test",
+        env: { SERVER: "https://example.com", TOKEN: "overridden" },
+        secrets: { TOKEN: "token-account" },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toEqual({
+        SERVER: "https://example.com",
+        TOKEN: "secret-token-account",
+      });
+      expect(opts?.redact).toContain("secret-token-account");
+    });
+  });
 });

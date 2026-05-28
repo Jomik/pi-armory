@@ -88,6 +88,31 @@ Tool names are automatically normalized to lowercase with underscores (e.g., "Ru
 
 Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
 
+### Environment variables
+
+Tools can inject environment variables into their subprocess via the `env` field:
+
+```json
+{
+  "name": "deploy",
+  "command": "./deploy.sh {{target}}",
+  "description": "Deploy to target environment",
+  "env": {
+    "SERVER_URL": "https://deploy.example.com",
+    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK"
+  }
+}
+```
+
+Values support three forms:
+- **Static** — `"https://..."` passed as-is
+- **Reference** — `"$VAR"` resolved from the host process environment at execution time; throws if not set
+- **Escaped** — `"$$literal"` becomes `"$literal"` (use `$$` to escape a leading dollar sign)
+
+> **⚠️ `env` values are visible in tool output shown to the LLM.** Do not put secrets here. Use the `secrets` field for sensitive values — those are stored in the macOS Keychain and redacted from all output.
+
+When both `env` and `secrets` define the same key, secrets take precedence and the env entry is skipped.
+
 ### Output
 
 Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included.

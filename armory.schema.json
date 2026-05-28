@@ -44,13 +44,23 @@
               "type": "string"
             }
           },
+          "env": {
+            "type": "object",
+            "patternProperties": {
+              "^.*$": {
+                "type": "string"
+              }
+            },
+            "description": "Non-secret environment variables injected into the command. Values starting with $ resolve from the host environment (e.g. \"$SSH_AUTH_SOCK\"). Use $$ to escape a literal dollar sign. These values are NOT redacted from output."
+          },
           "secrets": {
             "type": "object",
             "patternProperties": {
               "^.*$": {
                 "type": "string"
               }
-            }
+            },
+            "description": "Secret environment variables stored in the macOS Keychain. Keys are env var names; values are keychain account names. Resolved values are redacted from all tool output."
           }
         }
       }
