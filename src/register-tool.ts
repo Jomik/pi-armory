@@ -61,6 +61,60 @@ function buildParamSchema(tool: ArmoryTool): TObject {
   );
 }
 
+/**
+ * Resolves a single env value: $$ escape, $VAR reference, or static string.
+ */
+function resolveEnvValue(envVar: string, value: string): string {
+  if (value.startsWith("$$")) {
+    return value.slice(1);
+  }
+  if (value.startsWith("$")) {
+    const refName = value.slice(1);
+    const resolved = process.env[refName];
+    if (resolved == null) {
+      throw new Error(
+        `Environment variable '${refName}' (referenced by env.${envVar}) is not set. ` +
+          `Set it in your shell before launching pi, or use a static value in armory.json.`,
+      );
+    }
+    return resolved;
+  }
+  return value;
+}
+
+/**
+ * Resolves the env and secrets for a tool into extraEnv and redact arrays.
+ * Keys defined in both env and secrets are skipped in env (secrets win).
+ */
+async function resolveToolEnvironment(
+  tool: ArmoryTool,
+): Promise<{ extraEnv?: Record<string, string>; redact?: string[] }> {
+  const secretKeys = new Set(tool.secrets ? Object.keys(tool.secrets) : []);
+
+  // Resolve env (static values, $VAR references, $$ escape)
+  let extraEnv: Record<string, string> | undefined;
+  if (tool.env && Object.keys(tool.env).length > 0) {
+    extraEnv = {};
+    for (const [envVar, value] of Object.entries(tool.env)) {
+      if (secretKeys.has(envVar)) continue;
+      extraEnv[envVar] = resolveEnvValue(envVar, value);
+    }
+    if (Object.keys(extraEnv).length === 0) extraEnv = undefined;
+  }
+
+  // Fetch secrets from keychain
+  let redact: string[] | undefined;
+  if (tool.secrets && Object.keys(tool.secrets).length > 0) {
+    const entries = Object.entries(tool.secrets);
+    const values = await Promise.all(entries.map(([, account]) => fetchSecret(account)));
+    const secretEnv = Object.fromEntries(entries.map(([envVar], i) => [envVar, values[i] as string]));
+    extraEnv = { ...extraEnv, ...secretEnv };
+    redact = values;
+  }
+
+  return { extraEnv, redact };
+}
+
 /** Tools with requires_approval, keyed by name. Updated by registerArmoryTool. */
 export const approvalRegistry = new Map<string, ArmoryTool>();
 
@@ -130,20 +184,9 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
         throw new Error(`Invalid parameters: ${msg}`);
       }
 
-      // Interpolate parameters into the command string
       const command = interpolateCommand(tool.command, params as Record<string, unknown>);
+      const { extraEnv, redact } = await resolveToolEnvironment(tool);
 
-      // Fetch secrets from keychain and prepare extraEnv / redact
-      let extraEnv: Record<string, string> | undefined;
-      let redact: string[] | undefined;
-      if (tool.secrets && Object.keys(tool.secrets).length > 0) {
-        const entries = Object.entries(tool.secrets);
-        const values = await Promise.all(entries.map(([, account]) => fetchSecret(account)));
-        extraEnv = Object.fromEntries(entries.map(([envVar], i) => [envVar, values[i] as string]));
-        redact = values;
-      }
-
-      // Execute the command, streaming output
       const output = await executeCommand(command, {
         cwd: ctx.cwd,
         signal: signal,

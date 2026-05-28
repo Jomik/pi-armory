@@ -75,18 +75,14 @@ export function makeRedraftCallback(
   };
 }
 
-export function buildToolFromResult(
-  result: ToolFormResult,
-  opts?: {
-    secrets?: Record<string, string>;
-  },
-): ArmoryTool {
+export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTool, "env" | "secrets">): ArmoryTool {
   return {
     name: result.name,
     command: result.command,
     description: result.description,
     ...(result.requiresApproval ? { requires_approval: true } : {}),
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
+    ...(opts?.env ? { env: opts.env } : {}),
     ...(opts?.secrets ? { secrets: opts.secrets } : {}),
   };
 }

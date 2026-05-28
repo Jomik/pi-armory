@@ -138,7 +138,7 @@ async function handleEdit(
 
   if ("rejected" in result) return; // user rejected
 
-  const updatedTool = buildToolFromResult(result, { secrets: tool.secrets });
+  const updatedTool = buildToolFromResult(result, { env: tool.env, secrets: tool.secrets });
 
   // Save to new (or same) destination
   await saveConfig(updatedTool, result.destination, deps.projectRoot);
