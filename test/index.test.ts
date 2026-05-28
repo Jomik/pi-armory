@@ -116,17 +116,17 @@ describe("factory", () => {
       expect(result).toBeUndefined();
     });
 
-    it("shows confirm and allows execution when user approves", async () => {
+    it("shows approval panel and allows execution when user approves", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
       await factory(fakePi);
 
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
-      const ctx = { ui: { confirm: vi.fn().mockResolvedValue(true) } };
+      const customMock = vi.fn().mockResolvedValue(true);
+      const ctx = { ui: { custom: customMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
-      expect(ctx.ui.confirm).toHaveBeenCalledOnce();
-      expect(ctx.ui.confirm).toHaveBeenCalledWith("Run: dangerous", expect.stringContaining("/tmp"));
+      expect(customMock).toHaveBeenCalledOnce();
       expect(result).toBeUndefined();
     });
 
@@ -136,7 +136,8 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
-      const ctx = { ui: { confirm: vi.fn().mockResolvedValue(false) } };
+      const customMock = vi.fn().mockResolvedValue(false);
+      const ctx = { ui: { custom: customMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
@@ -156,10 +157,11 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
-      const ctx = { ui: { confirm: vi.fn().mockResolvedValue(false) } };
+      const customMock = vi.fn().mockResolvedValue(false);
+      const ctx = { ui: { custom: customMock } };
       const result = await handler?.({ toolName: "new-tool", input: {} }, ctx);
 
-      expect(ctx.ui.confirm).toHaveBeenCalledOnce();
+      expect(customMock).toHaveBeenCalledOnce();
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
     });
   });

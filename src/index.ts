@@ -1,4 +1,5 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { createApprovalPanel } from "./approval-panel.js";
 import { registerArmoryCommand } from "./commands.js";
 import { loadConfig } from "./config.js";
 import { approvalRegistry, interpolateCommand, registerArmoryTool } from "./register-tool.js";
@@ -36,15 +37,22 @@ const factory: ExtensionFactory = async (pi) => {
     const tool = approvalRegistry.get(event.toolName);
     if (!tool) return;
 
-    let command: string;
     try {
-      command = interpolateCommand(tool.command, event.input as Record<string, unknown>);
+      interpolateCommand(tool.command, event.input as Record<string, unknown>);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "interpolation failed";
       return { block: true, reason: `Cannot run '${tool.name}': ${msg}` };
     }
 
-    const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
+    const approved = await ctx.ui.custom<boolean>(
+      (tui, theme, _kb, done) =>
+        createApprovalPanel(tui, theme, done, {
+          toolName: tool.name,
+          command: tool.command,
+          params: event.input as Record<string, unknown>,
+        }),
+      { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
+    );
     if (!approved) {
       return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
     }
