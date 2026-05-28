@@ -78,17 +78,23 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 - `/armory secrets` opens a TUI panel to manage stored keychain entries (set/delete)
 - If a secret is missing from keychain at execution time, the fetch throws an error
 
-1. Agent calls `request_tool` with a proposed `{ name, command, description, requires_approval?, guidelines? }`
-2. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
-3. A custom TUI form is shown (via `ctx.ui.custom`) where the human can:
+1. Agent calls `request_tool` with `{ command, reasoning, context? }`
+   - `command`: the shell command or script path
+   - `reasoning`: why this tool is needed, what problem it solves
+   - `context`: optional file contents, script bodies, or usage examples that inform the draft
+2. If a draft model is configured, it produces a full tool definition from the input
+   - If the model lacks sufficient context (e.g., script contents not provided), it rejects with a reason
+   - The agent receives `"Draft rejected: <reason>"` and can retry with more context
+3. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
+4. A custom TUI form is shown (via `ctx.ui.custom`) where the human can:
    - See the proposed tool
    - Edit name, command, description inline
    - Add/remove guidelines
    - Toggle `requires_approval`
    - Choose destination: project-local (default) or global
-   - Approve or reject
-4. On approve, the tool is written to the chosen config file and available next turn
-5. On reject, the agent gets a rejection message
+   - Approve or reject (with optional reason)
+5. On approve, the tool is written to the chosen config file and available next turn
+6. On reject, the agent receives `"User rejected: <reason>"` and can adjust and retry
 
 ## `requires_approval` execution flow
 

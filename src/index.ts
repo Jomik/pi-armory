@@ -1,6 +1,6 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { registerArmoryCommand } from "./commands.js";
 import { loadConfig } from "./config.js";
-import { registerArmoryCommand } from "./manage-secrets.js";
 import { approvalRegistry, interpolateCommand, registerArmoryTool } from "./register-tool.js";
 import { registerRequestTool } from "./request-tool.js";
 
@@ -36,7 +36,13 @@ const factory: ExtensionFactory = async (pi) => {
     const tool = approvalRegistry.get(event.toolName);
     if (!tool) return;
 
-    const command = interpolateCommand(tool.command, event.input as Record<string, unknown>);
+    let command: string;
+    try {
+      command = interpolateCommand(tool.command, event.input as Record<string, unknown>);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "interpolation failed";
+      return { block: true, reason: `Cannot run '${tool.name}': ${msg}` };
+    }
 
     const approved = await ctx.ui.confirm(`Run: ${tool.name}`, `Command: ${command}\n\nApprove execution?`);
     if (!approved) {

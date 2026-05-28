@@ -18,6 +18,11 @@ export interface ToolFormCallbacks {
   onRedraft?: (current: ToolFormResult, instruction: string) => Promise<Partial<ToolFormResult> | null>;
 }
 
+export interface ToolFormRejection {
+  rejected: true;
+  reason: string;
+}
+
 export interface ToolFormResult {
   name: string;
   command: string;
@@ -30,16 +35,16 @@ export interface ToolFormResult {
 export function toolFormPanel(
   tui: TUI,
   theme: Theme,
-  done: (result: ToolFormResult | null) => void,
+  done: (result: ToolFormResult | ToolFormRejection) => void,
   initialState: ToolFormState,
   callbacks?: ToolFormCallbacks,
 ): { invalidate(): void; render(width: number): string[]; handleInput(data: string): void } {
-  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination
+  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=re-draft (if available)
   let requiresApproval = initialState.requiresApproval;
   let destination: "project" | "global" = initialState.destination;
   let guidelines: string[] = initialState.guidelines;
   const title = initialState.title ?? "Request Tool";
-  let mode: "normal" | "instruction" | "drafting" = "normal";
+  let mode: "normal" | "instruction" | "drafting" | "rejecting" = "normal";
   let draftError: string | null = null;
   const maxFocus = callbacks?.onRedraft ? 6 : 5;
 
@@ -59,6 +64,7 @@ export function toolFormPanel(
   const descEditor = new Editor(tui, editorTheme);
   const guidelinesEditor = new Editor(tui, editorTheme);
   const instructionEditor = new Editor(tui, editorTheme);
+  const rejectionEditor = new Editor(tui, editorTheme);
 
   nameEditor.setText(initialState.name);
   commandEditor.setText(initialState.command);
@@ -82,6 +88,7 @@ export function toolFormPanel(
       for (const ed of textEditors) ed.invalidate();
       guidelinesEditor.invalidate();
       instructionEditor.invalidate();
+      rejectionEditor.invalidate();
     },
 
     render(width: number): string[] {
@@ -221,7 +228,20 @@ export function toolFormPanel(
 
       lines.push("");
       let hint: string;
-      if (mode === "instruction") {
+      if (mode === "rejecting") {
+        rejectionEditor.focused = true;
+        const rejectLabel = "Reason:".padEnd(LABEL);
+        const edLines = rejectionEditor.render(fieldWidth);
+        const midLine = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
+        for (let j = 0; j < edLines.length; j++) {
+          if (j === midLine) {
+            lines.push(` ${theme.fg("accent", rejectLabel)} ${edLines[j]}`);
+          } else {
+            lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
+          }
+        }
+        hint = "Enter reject  •  Esc cancel";
+      } else if (mode === "instruction") {
         hint = "Enter submit instruction  •  Esc cancel";
       } else if (mode === "drafting") {
         hint = "";
@@ -289,8 +309,27 @@ export function toolFormPanel(
         return;
       }
 
+      // In rejecting mode, handle reason entry
+      if (mode === "rejecting") {
+        if (matchesKey(data, Key.escape)) {
+          mode = "normal";
+          rejectionEditor.setText("");
+          tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, Key.enter)) {
+          const reason = rejectionEditor.getText().trim();
+          done({ rejected: true, reason });
+          return;
+        }
+        rejectionEditor.handleInput(data);
+        tui.requestRender();
+        return;
+      }
+
       if (matchesKey(data, Key.escape)) {
-        done(null);
+        mode = "rejecting";
+        tui.requestRender();
         return;
       }
 

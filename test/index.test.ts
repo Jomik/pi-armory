@@ -10,7 +10,7 @@ vi.mock("../src/register-tool.js", async (importOriginal) => {
   };
 });
 vi.mock("../src/request-tool.js");
-vi.mock("../src/manage-secrets.js");
+vi.mock("../src/commands.js");
 vi.mock("../src/executor.js");
 vi.mock("../src/keychain.js");
 

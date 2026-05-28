@@ -69,10 +69,18 @@ Values are shell-escaped before substitution. No separate `parameters` config fi
 Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via an interactive form:
 
 ```
-Agent calls: request_tool({ name: "run_tests", command: "npm test", description: "Run the test suite", guidelines: ["Run before committing"] })
+Agent calls: request_tool({
+  command: "./scripts/deploy.sh",
+  reasoning: "Need a tool to deploy to staging after tests pass",
+  context: "<contents of scripts/deploy.sh>"
+})
+→ Draft model produces a full tool definition (or rejects if context is insufficient)
 → Human sees a TUI form, can edit fields, add/remove guidelines, toggle approval, choose project/global
 → On approve: tool is saved to config and available next turn
+→ On reject: human can provide a reason that’s returned to the agent
 ```
+
+If the draft model determines it lacks sufficient context (e.g., command references a script whose contents weren’t provided), it rejects the request with a reason. The agent receives the rejection message and can retry with additional context.
 
 Tool names are automatically normalized to lowercase with underscores (e.g., "Run Tests" → `run_tests`).
 
