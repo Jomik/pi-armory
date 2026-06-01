@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0](https://github.com/Jomik/pi-armory/compare/v0.3.0...v0.4.0) (2026-06-01)
+
+
+### Features
+
+* add `env` field for non-secret environment variables ([#18](https://github.com/Jomik/pi-armory/issues/18)) ([d5833ba](https://github.com/Jomik/pi-armory/commit/d5833ba234bd4352b948d1a04086c5cdb7fbbd24))
+* add JSON Schema generation from TypeBox definitions ([#11](https://github.com/Jomik/pi-armory/issues/11)) ([780b3f3](https://github.com/Jomik/pi-armory/commit/780b3f345e871a4a12ccf90a74995cf09ab918d6))
+* add renderCall/renderResult for tool UI improvements ([18fba1a](https://github.com/Jomik/pi-armory/commit/18fba1ad60a2373c78f6bb7ee74a69d343f409b5))
+* improve request_tool feedback loop ([#17](https://github.com/Jomik/pi-armory/issues/17)) ([eff075c](https://github.com/Jomik/pi-armory/commit/eff075cff60cf3c0a05fdfd0a0ecbe82b2b9e4e6))
+* structured approval panel and renderCall parameter view ([#19](https://github.com/Jomik/pi-armory/issues/19)) ([07a61a1](https://github.com/Jomik/pi-armory/commit/07a61a1e30d25a6c6f53cc83521fdd84306937a2))
+* support optional and string[] parameter types ([#14](https://github.com/Jomik/pi-armory/issues/14)) ([07d6bed](https://github.com/Jomik/pi-armory/commit/07d6bed72ede95008115342faef9e3824eb81218))
+* template syntax for parameter modifiers ([#15](https://github.com/Jomik/pi-armory/issues/15)) ([30fa627](https://github.com/Jomik/pi-armory/commit/30fa627ecb2b3dd0f3b615af9ddf41c8c125b967))
+
+
+### Bug Fixes
+
+* **draft:** improve parameterization guidance with reusability principle ([be10a85](https://github.com/Jomik/pi-armory/commit/be10a850a01ec45d13f2d83b9c1daaf3eeb96584))
+* terminate agent loop after request_tool registration ([f36b72c](https://github.com/Jomik/pi-armory/commit/f36b72c1a5b146524c4ab35d5e74c83e3c9f2c35))
+
 ## [0.3.0](https://github.com/Jomik/pi-armory/compare/v0.2.1...v0.3.0) (2026-05-24)
 
 
