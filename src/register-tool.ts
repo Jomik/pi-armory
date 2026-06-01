@@ -13,7 +13,32 @@ function shellEscape(value: string): string {
 }
 
 export function interpolateCommand(command: string, params: Record<string, unknown>): string {
-  const result = command.replace(
+  // Phase 1: Replace flag placeholders ({{--flag}}, {{--flag?}}, {{--flag value}}, {{--flag value?}}, etc.)
+  let result = command.replace(
+    /\{\{(-{1,2}[\w-]+)(?:\s+([\w]+)(\?)?)?\s*(\?)?\}\}/g,
+    (_match, flagStr: string, valName: string | undefined, valOpt: string | undefined, boolOpt: string | undefined) => {
+      if (valName !== undefined) {
+        // Flag+value placeholder
+        const isOptional = valOpt === "?";
+        if (!(valName in params) || params[valName] === undefined) {
+          if (isOptional) return "";
+          throw new Error(`Missing required parameter: ${valName}`);
+        }
+        return `${flagStr} ${shellEscape(String(params[valName]))}`;
+      }
+      // Boolean flag placeholder
+      const name = flagStr.replace(/^-+/, "");
+      const isOptional = boolOpt === "?";
+      if (!(name in params) || params[name] === undefined) {
+        if (isOptional) return "";
+        throw new Error(`Missing required parameter: ${name}`);
+      }
+      return params[name] === true ? flagStr : "";
+    },
+  );
+
+  // Phase 2: Replace regular placeholders ({{name}}, {{name?}}, {{...name}}, {{...name?}})
+  result = result.replace(
     /(["'])\{\{(\.\.\.)?([\w]+)(\?)?\}\}\1|\{\{(\.\.\.)?([\w]+)(\?)?\}\}/g,
     (_match, _quote, quotedSpread, quotedKey, quotedOpt, bareSpread, bareKey, bareOpt) => {
       const key = quotedKey ?? bareKey;
@@ -38,8 +63,8 @@ export function interpolateCommand(command: string, params: Record<string, unkno
     },
   );
 
-  // Trim edges (from omitted optional params at start/end of command)
-  return result.trim();
+  // Collapse consecutive spaces (from omitted flags) and trim edges
+  return result.replace(/\s+/g, " ").trim();
 }
 
 function buildParamSchema(tool: ArmoryTool): TObject {
@@ -49,9 +74,11 @@ function buildParamSchema(tool: ArmoryTool): TObject {
   return Type.Object(
     Object.fromEntries(
       parsed.map((p) => {
-        let fieldSchema = p.variadic
-          ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
-          : Type.String({ description: p.name, minLength: 1 });
+        let fieldSchema = p.boolean
+          ? Type.Boolean({ description: p.name })
+          : p.variadic
+            ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
+            : Type.String({ description: p.name, minLength: 1 });
         if (p.optional) {
           fieldSchema = Type.Optional(fieldSchema);
         }

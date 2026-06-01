@@ -433,4 +433,222 @@ describe("registerArmoryTool — parameter interpolation", () => {
 
     expect(mockExecuteCommand).toHaveBeenCalledWith("run 'hello'", expect.objectContaining({}));
   });
+
+  // ─── Flag parameter tests ──────────────────────────────────────────────────
+
+  describe("flag parameters — boolean flags", () => {
+    it("required boolean flag: true emits the flag", () => {
+      const result = interpolateCommand("echo {{--verbose}}", { verbose: true });
+      expect(result).toBe("echo --verbose");
+    });
+
+    it("required boolean flag: false emits nothing", () => {
+      const result = interpolateCommand("echo {{--verbose}}", { verbose: false });
+      expect(result).toBe("echo");
+    });
+
+    it("required boolean flag: missing throws Missing required parameter", () => {
+      expect(() => interpolateCommand("echo {{--verbose}}", {})).toThrow("Missing required parameter: verbose");
+    });
+
+    it("optional boolean flag: true emits the flag", () => {
+      const result = interpolateCommand("ls {{--all?}}", { all: true });
+      expect(result).toBe("ls --all");
+    });
+
+    it("optional boolean flag: omitted emits nothing", () => {
+      const result = interpolateCommand("ls {{--all?}}", {});
+      expect(result).toBe("ls");
+    });
+
+    it("optional boolean flag: false emits nothing", () => {
+      const result = interpolateCommand("ls {{--all?}}", { all: false });
+      expect(result).toBe("ls");
+    });
+
+    it("short boolean flag: true emits -l", () => {
+      const result = interpolateCommand("ls {{-l?}}", { l: true });
+      expect(result).toBe("ls -l");
+    });
+
+    it("short boolean flag: omitted emits nothing", () => {
+      const result = interpolateCommand("ls {{-l?}}", {});
+      expect(result).toBe("ls");
+    });
+
+    it("boolean flag builds Type.Boolean schema", () => {
+      const tool: ArmoryTool = { name: "t", command: "cmd {{--verbose}}", description: "test" };
+      let capturedDef: { parameters: { properties?: Record<string, { type?: string }> } } | undefined;
+      const pi = {
+        registerTool: vi.fn((def: typeof capturedDef) => {
+          capturedDef = def;
+        }),
+      } as unknown as ExtensionAPI;
+      registerArmoryTool(pi, tool);
+      expect(capturedDef?.parameters?.properties?.verbose?.type).toBe("boolean");
+    });
+
+    it("optional boolean flag builds Type.Optional(Type.Boolean) schema", () => {
+      const tool: ArmoryTool = { name: "t", command: "cmd {{--verbose?}}", description: "test" };
+      let capturedDef: { parameters: { properties?: Record<string, { type?: string }> } } | undefined;
+      const pi = {
+        registerTool: vi.fn((def: typeof capturedDef) => {
+          capturedDef = def;
+        }),
+      } as unknown as ExtensionAPI;
+      registerArmoryTool(pi, tool);
+      // Type.Optional wraps — the property should still have type boolean
+      expect(capturedDef?.parameters?.properties?.verbose?.type).toBe("boolean");
+    });
+
+    it("required boolean flag: registered tool validates boolean type", async () => {
+      const tool: ArmoryTool = { name: "t", command: "cmd {{--verbose}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      // Missing param → validation error
+      await expect(execute("c", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        "Invalid parameters",
+      );
+    });
+
+    it("required boolean flag: registered tool executes with true", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = { name: "t", command: "cmd {{--verbose}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      await execute("c", { verbose: true }, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith("cmd --verbose", expect.objectContaining({}));
+    });
+
+    it("required boolean flag: registered tool executes with false", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = { name: "t", command: "cmd {{--verbose}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      await execute("c", { verbose: false }, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith("cmd", expect.objectContaining({}));
+    });
+  });
+
+  describe("flag parameters — flag+value", () => {
+    it("required flag+value: emits flag and shell-escaped value", () => {
+      const result = interpolateCommand("git commit {{--message message}}", { message: "fix bug" });
+      expect(result).toBe("git commit --message 'fix bug'");
+    });
+
+    it("required flag+value: missing throws Missing required parameter", () => {
+      expect(() => interpolateCommand("git commit {{--message message}}", {})).toThrow(
+        "Missing required parameter: message",
+      );
+    });
+
+    it("optional flag+value: provided emits flag and value", () => {
+      const result = interpolateCommand("git log {{--author author?}}", { author: "alice" });
+      expect(result).toBe("git log --author 'alice'");
+    });
+
+    it("optional flag+value: omitted emits nothing", () => {
+      const result = interpolateCommand("git log {{--author author?}}", {});
+      expect(result).toBe("git log");
+    });
+
+    it("short flag+value: emits -m and shell-escaped value", () => {
+      const result = interpolateCommand("git commit {{-m message}}", { message: "fix bug" });
+      expect(result).toBe("git commit -m 'fix bug'");
+    });
+
+    it("short flag+value: shell-escapes value with quotes", () => {
+      const result = interpolateCommand("git commit {{-m message}}", { message: "it's fixed" });
+      expect(result).toBe("git commit -m 'it'\\''s fixed'");
+    });
+
+    it("optional short flag+value: omitted emits nothing", () => {
+      const result = interpolateCommand("git log {{-n count?}}", {});
+      expect(result).toBe("git log");
+    });
+
+    it("flag+value builds Type.String schema", () => {
+      const tool: ArmoryTool = { name: "t", command: "git commit {{--message message}}", description: "test" };
+      let capturedDef: { parameters: { properties?: Record<string, { type?: string }> } } | undefined;
+      const pi = {
+        registerTool: vi.fn((def: typeof capturedDef) => {
+          capturedDef = def;
+        }),
+      } as unknown as ExtensionAPI;
+      registerArmoryTool(pi, tool);
+      expect(capturedDef?.parameters?.properties?.message?.type).toBe("string");
+    });
+
+    it("required flag+value: registered tool validates string type", async () => {
+      const tool: ArmoryTool = { name: "t", command: "git commit {{--message message}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      await expect(execute("c", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        "Invalid parameters",
+      );
+    });
+
+    it("required flag+value: registered tool executes with value", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = { name: "t", command: "git commit {{--message message}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      await execute("c", { message: "add feature" }, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith(
+        "git commit --message 'add feature'",
+        expect.objectContaining({}),
+      );
+    });
+
+    it("optional flag+value: registered tool omits when not provided", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = { name: "t", command: "git log {{--author author?}}", description: "test" };
+      const execute = registerAndCapture(tool);
+      await execute("c", {}, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith("git log", expect.objectContaining({}));
+    });
+  });
+
+  describe("flag parameters — mixed with regular params", () => {
+    it("all flags and regular param provided", () => {
+      const result = interpolateCommand("git log {{--oneline?}} {{-n count?}} {{path}}", {
+        path: "src/",
+        oneline: true,
+        count: "10",
+      });
+      expect(result).toBe("git log --oneline -n '10' 'src/'");
+    });
+
+    it("all optional flags omitted, regular param provided", () => {
+      const result = interpolateCommand("git log {{--oneline?}} {{-n count?}} {{path}}", { path: "src/" });
+      expect(result).toBe("git log 'src/'");
+    });
+
+    it("boolean flag false, flag+value omitted, regular param provided", () => {
+      const result = interpolateCommand("git log {{--oneline?}} {{-n count?}} {{path}}", {
+        path: "main.ts",
+        oneline: false,
+      });
+      expect(result).toBe("git log 'main.ts'");
+    });
+
+    it("registered tool with mixed flags and regular params", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = {
+        name: "git-log",
+        command: "git log {{--oneline?}} {{-n count?}} {{path}}",
+        description: "Git log",
+      };
+      const execute = registerAndCapture(tool);
+      await execute("c", { path: ".", oneline: true, count: "5" }, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith("git log --oneline -n '5' '.'", expect.objectContaining({}));
+    });
+
+    it("registered tool with mixed flags: optional flags omitted", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const tool: ArmoryTool = {
+        name: "git-log",
+        command: "git log {{--oneline?}} {{-n count?}} {{path}}",
+        description: "Git log",
+      };
+      const execute = registerAndCapture(tool);
+      await execute("c", { path: "." }, new AbortController().signal, undefined, makeCtx());
+      expect(mockExecuteCommand).toHaveBeenCalledWith("git log '.'", expect.objectContaining({}));
+    });
+  });
 });
