@@ -54,6 +54,69 @@ Parameters are declared entirely via command template syntax — no separate con
 
 At execution time, values are validated with TypeBox (`minLength: 1` for strings, `minItems: 1` for arrays). If you provide a value, it must have content; omit the key entirely to skip an optional param.
 
+### Flag parameters
+
+Flags are parameters that emit a CLI flag (e.g. `--verbose`, `-m 'msg'`) when provided, and nothing when absent.
+
+#### Syntax
+
+- `{{--flag?}}` — optional boolean flag, outputs `--flag` when true, nothing when false/omitted
+- `{{--flag}}` — required boolean flag (must be provided as true/false)
+- `{{-f?}}` — short optional boolean flag, outputs `-f` when true
+- `{{--flag value?}}` — optional flag+value, outputs `--flag 'value'` when provided, nothing when omitted
+- `{{--flag value}}` — required flag+value, must be provided
+- `{{-m message?}}` — short flag+value, outputs `-m 'message'` when provided
+
+The rule: a placeholder starting with `-` or `--` is a flag. If a word follows the flag, it names the parameter and the flag takes a value (string). If no word follows, the parameter is boolean and named after the flag (stripped of dashes).
+
+#### Parameter naming
+
+- `{{--resolved?}}` → param name: `resolved`, type: boolean
+- `{{-r?}}` → param name: `r`, type: boolean
+- `{{--message msg?}}` → param name: `msg`, type: string
+- `{{-m message?}}` → param name: `message`, type: string
+
+#### Schema generation
+
+- Boolean flags → `Type.Boolean()` (wrapped with `Type.Optional()` when `?` is present)
+- Flag+value → `Type.String({ minLength: 1 })` (wrapped with `Type.Optional()` when `?` is present)
+
+#### Interpolation
+
+- Boolean flag, value `true` → emit the flag string (e.g. `--resolved`)
+- Boolean flag, value `false` or omitted (when optional) → emit nothing
+- Flag+value, value provided → emit `flag 'shell-escaped-value'` (space-separated)
+- Flag+value, omitted (when optional) → emit nothing
+
+#### Examples
+
+```json
+{
+  "name": "jj_resolve",
+  "command": "jj resolve {{--message msg?}} {{path}}",
+  "description": "Mark a conflict as resolved"
+}
+```
+
+With `msg="fixed merge"`, `path="src/main.ts"`: `jj resolve --message 'fixed merge' 'src/main.ts'`
+With `path="src/main.ts"`, msg omitted: `jj resolve 'src/main.ts'`
+
+```json
+{
+  "name": "git_log",
+  "command": "git log {{--oneline?}} {{-n count?}}",
+  "description": "Show git log"
+}
+```
+
+With `oneline=true`, `count="10"`: `git log --oneline -n '10'`
+With `oneline=false`, count omitted: `git log`
+
+#### Non-goals
+
+- Variadic flags (e.g. `--exclude a --exclude b`) — not supported; use variadic params and a wrapper script if needed
+- Equals syntax (`--flag=value`) — output is always space-separated; bake the `=` into the command if a specific tool requires it
+
 ### Example
 
 ```json

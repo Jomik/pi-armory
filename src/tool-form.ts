@@ -176,6 +176,12 @@ export function toolFormPanel(
         placeholders.length > 0
           ? placeholders
               .map((p) => {
+                if (p.flag) {
+                  if (p.boolean) {
+                    return `${p.flag}${p.optional ? "?" : ""}`;
+                  }
+                  return `${p.flag} ${p.name}${p.optional ? "?" : ""}`;
+                }
                 const prefix = p.variadic ? "..." : "";
                 const suffix = p.optional ? "?" : "";
                 return `${prefix}${p.name}${suffix}`;
