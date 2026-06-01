@@ -157,6 +157,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           },
         ],
         details: undefined,
+        terminate: true,
       };
     },
   });
