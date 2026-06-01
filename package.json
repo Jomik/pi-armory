@@ -1,6 +1,6 @@
 {
   "name": "pi-armory",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packageManager": "npm@11.12.1",
   "description": "Declarative command tools for pi — structured, pre-approved commands instead of a shell.",
   "license": "MIT",
