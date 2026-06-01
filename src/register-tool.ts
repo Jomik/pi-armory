@@ -6,21 +6,77 @@ import { Value } from "typebox/value";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
 import { fetchSecret } from "./keychain.js";
-import { formatParamValue, parsePlaceholders } from "./shared.js";
+import { FLAG_PLACEHOLDER_RE, formatParamValue, parsePlaceholders } from "./shared.js";
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function collapseUnquotedSpaces(s: string): string {
+  let out = "";
+  let inQuote = false;
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "'" && !inQuote) {
+      inQuote = true;
+      out += s[i];
+      i++;
+    } else if (s[i] === "'" && inQuote) {
+      // Check for escaped quote pattern: '\''
+      if (s.slice(i, i + 4) === "'\\''") {
+        out += "'\\''";
+        i += 4;
+      } else {
+        inQuote = false;
+        out += s[i];
+        i++;
+      }
+    } else if (!inQuote && s[i] === " ") {
+      // Collapse consecutive unquoted spaces to single space (preserve newlines/tabs)
+      out += " ";
+      while (i < s.length && s[i] === " ") i++;
+    } else {
+      out += s[i];
+      i++;
+    }
+  }
+  return out.replace(/^ +| +$/g, "");
+}
+
 export function interpolateCommand(command: string, params: Record<string, unknown>): string {
-  const result = command.replace(
+  // Phase 1: Replace flag placeholders ({{--flag}}, {{--flag?}}, {{--flag value}}, {{--flag value?}}, etc.)
+  let result = command.replace(
+    FLAG_PLACEHOLDER_RE(),
+    (_match, flagStr: string, valName: string | undefined, valOpt: string | undefined, boolOpt: string | undefined) => {
+      if (valName !== undefined) {
+        // Flag+value placeholder
+        const isOptional = valOpt === "?";
+        if (!Object.hasOwn(params, valName) || params[valName] === undefined) {
+          if (isOptional) return "";
+          throw new Error(`Missing required parameter: ${valName}`);
+        }
+        return `${flagStr} ${shellEscape(String(params[valName]))}`;
+      }
+      // Boolean flag placeholder
+      const name = flagStr.replace(/^-+/, "");
+      const isOptional = boolOpt === "?";
+      if (!Object.hasOwn(params, name) || params[name] === undefined) {
+        if (isOptional) return "";
+        throw new Error(`Missing required parameter: ${name}`);
+      }
+      return params[name] === true ? flagStr : "";
+    },
+  );
+
+  // Phase 2: Replace regular placeholders ({{name}}, {{name?}}, {{...name}}, {{...name?}})
+  result = result.replace(
     /(["'])\{\{(\.\.\.)?([\w]+)(\?)?\}\}\1|\{\{(\.\.\.)?([\w]+)(\?)?\}\}/g,
     (_match, _quote, quotedSpread, quotedKey, quotedOpt, bareSpread, bareKey, bareOpt) => {
       const key = quotedKey ?? bareKey;
       const isVariadic = (quotedSpread ?? bareSpread) === "...";
       const isOptional = (quotedOpt ?? bareOpt) === "?";
 
-      if (!(key in params) || params[key] === undefined) {
+      if (!Object.hasOwn(params, key) || params[key] === undefined) {
         if (isOptional) {
           return "";
         }
@@ -38,8 +94,8 @@ export function interpolateCommand(command: string, params: Record<string, unkno
     },
   );
 
-  // Trim edges (from omitted optional params at start/end of command)
-  return result.trim();
+  // Collapse consecutive spaces (from omitted flags) and trim edges, but preserve whitespace inside single-quoted values
+  return collapseUnquotedSpaces(result);
 }
 
 function buildParamSchema(tool: ArmoryTool): TObject {
@@ -49,9 +105,11 @@ function buildParamSchema(tool: ArmoryTool): TObject {
   return Type.Object(
     Object.fromEntries(
       parsed.map((p) => {
-        let fieldSchema = p.variadic
-          ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
-          : Type.String({ description: p.name, minLength: 1 });
+        let fieldSchema = p.boolean
+          ? Type.Boolean({ description: p.name })
+          : p.variadic
+            ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
+            : Type.String({ description: p.name, minLength: 1 });
         if (p.optional) {
           fieldSchema = Type.Optional(fieldSchema);
         }

@@ -42,6 +42,13 @@ Placeholder syntax:
 - {{name?}} — optional single value (omitted from command when not provided)
 - {{...name}} — required variadic (type "string[]", expands to multiple shell-escaped args)
 - {{...name?}} — optional variadic (omitted when not provided)
+- {{--flag}} — required boolean flag (emitted when true, omitted when false; param name: "flag")
+- {{--flag?}} — optional boolean flag (agent may omit entirely)
+- {{-f}} / {{-f?}} — short boolean flag variants
+- {{--flag value}} — required flag+value pair (param name: "value")
+- {{--flag value?}} — optional flag+value pair
+- {{-f value}} / {{-f value?}} — short flag+value variants
+Flag values are auto shell-escaped; flag strings are emitted as-is.
 
 Parameterization:
 The goal is a reusable tool. Extract anything the calling agent might need or want to change between invocations. Keep hardcoded anything that defines the tool's identity and is unlikely to change.
@@ -141,6 +148,13 @@ Placeholder syntax in the command field:
 - {{name?}} — optional single value (omitted from command when not provided)
 - {{...name}} — required variadic (expands to multiple shell-escaped args)
 - {{...name?}} — optional variadic (omitted when not provided)
+- {{--flag}} — required boolean flag (emitted when true, omitted when false)
+- {{--flag?}} — optional boolean flag
+- {{-f}} / {{-f?}} — short boolean flag variants
+- {{--flag value}} — required flag+value pair
+- {{--flag value?}} — optional flag+value pair
+- {{-f value}} / {{-f value?}} — short flag+value variants
+Flag values are auto shell-escaped; flag strings are emitted as-is.
 
 Never quote placeholders — they are auto shell-escaped.
 
