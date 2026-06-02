@@ -30,19 +30,27 @@ describe("extractPlaceholders", () => {
 
 describe("parsePlaceholders", () => {
   it("parses plain placeholder as required string", () => {
-    expect(parsePlaceholders("echo {{name}}")).toEqual([{ kind: "regular", name: "name", variadic: false, optional: false }]);
+    expect(parsePlaceholders("echo {{name}}")).toEqual([
+      { kind: "regular", name: "name", variadic: false, optional: false },
+    ]);
   });
 
   it("parses optional placeholder", () => {
-    expect(parsePlaceholders("echo {{name?}}")).toEqual([{ kind: "regular", name: "name", variadic: false, optional: true }]);
+    expect(parsePlaceholders("echo {{name?}}")).toEqual([
+      { kind: "regular", name: "name", variadic: false, optional: true },
+    ]);
   });
 
   it("parses variadic placeholder", () => {
-    expect(parsePlaceholders("run {{...args}}")).toEqual([{ kind: "regular", name: "args", variadic: true, optional: false }]);
+    expect(parsePlaceholders("run {{...args}}")).toEqual([
+      { kind: "regular", name: "args", variadic: true, optional: false },
+    ]);
   });
 
   it("parses variadic optional placeholder", () => {
-    expect(parsePlaceholders("run {{...args?}}")).toEqual([{ kind: "regular", name: "args", variadic: true, optional: true }]);
+    expect(parsePlaceholders("run {{...args?}}")).toEqual([
+      { kind: "regular", name: "args", variadic: true, optional: true },
+    ]);
   });
 
   it("parses mixed placeholders", () => {
@@ -53,7 +61,9 @@ describe("parsePlaceholders", () => {
   });
 
   it("deduplicates by name", () => {
-    expect(parsePlaceholders("cp {{file}} {{file}}")).toEqual([{ kind: "regular", name: "file", variadic: false, optional: false }]);
+    expect(parsePlaceholders("cp {{file}} {{file}}")).toEqual([
+      { kind: "regular", name: "file", variadic: false, optional: false },
+    ]);
   });
 
   it("throws on conflicting modifiers for same name", () => {
@@ -68,6 +78,55 @@ describe("parsePlaceholders", () => {
     expect(parsePlaceholders("run {{...args?}} and {{...args?}}")).toEqual([
       { kind: "regular", name: "args", variadic: true, optional: true },
     ]);
+  });
+
+  it("parses boolean flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{--verbose}}")).toEqual([
+      { kind: "boolean-flag", name: "verbose", flag: "--verbose", optional: false },
+    ]);
+  });
+
+  it("parses optional boolean flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{--verbose?}}")).toEqual([
+      { kind: "boolean-flag", name: "verbose", flag: "--verbose", optional: true },
+    ]);
+  });
+
+  it("parses short boolean flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{-v}}")).toEqual([
+      { kind: "boolean-flag", name: "v", flag: "-v", optional: false },
+    ]);
+  });
+
+  it("parses value flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{--message msg}}")).toEqual([
+      { kind: "value-flag", name: "msg", flag: "--message", optional: false },
+    ]);
+  });
+
+  it("parses optional value flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{--message msg?}}")).toEqual([
+      { kind: "value-flag", name: "msg", flag: "--message", optional: true },
+    ]);
+  });
+
+  it("parses short value flag placeholder", () => {
+    expect(parsePlaceholders("cmd {{-m message}}")).toEqual([
+      { kind: "value-flag", name: "message", flag: "-m", optional: false },
+    ]);
+  });
+
+  it("returns flags before regulars regardless of string position", () => {
+    expect(parsePlaceholders("cmd {{file}} {{--verbose}}")).toEqual([
+      { kind: "boolean-flag", name: "verbose", flag: "--verbose", optional: false },
+      { kind: "regular", name: "file", variadic: false, optional: false },
+    ]);
+  });
+
+  it("detects conflict when regular placeholder appears before flag with same name", () => {
+    expect(() => parsePlaceholders("cmd {{verbose}} {{--verbose}}")).toThrow(
+      "Conflicting modifiers for placeholder: verbose",
+    );
   });
 });
 
