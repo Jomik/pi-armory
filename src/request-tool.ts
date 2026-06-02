@@ -9,8 +9,6 @@ import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
 
 export { extractPlaceholders } from "./shared.js";
 
-import { type ToolFormRejection, type ToolFormResult } from "./tool-form.js";
-
 const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
 

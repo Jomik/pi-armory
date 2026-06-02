@@ -4,7 +4,6 @@ import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
 import { approvalRegistry, registerArmoryTool } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
 import { buildToolFromResult, showToolEditor } from "./shared.js";
-import { type ToolFormRejection, type ToolFormResult } from "./tool-form.js";
 
 export interface ArmoryCommandDeps {
   tools: ArmoryTool[];

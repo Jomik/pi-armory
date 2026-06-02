@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { type TObject, Type } from "typebox";
+import { type TObject, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ArmoryTool } from "./config.js";
 import { executeCommand } from "./executor.js";
@@ -105,11 +105,20 @@ function buildParamSchema(tool: ArmoryTool): TObject {
   return Type.Object(
     Object.fromEntries(
       parsed.map((p) => {
-        let fieldSchema = p.boolean
-          ? Type.Boolean({ description: p.name })
-          : p.variadic
-            ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
-            : Type.String({ description: p.name, minLength: 1 });
+        let fieldSchema: TSchema;
+        switch (p.kind) {
+          case "boolean-flag":
+            fieldSchema = Type.Boolean({ description: p.name });
+            break;
+          case "regular":
+            fieldSchema = p.variadic
+              ? Type.Array(Type.String(), { description: p.name, minItems: 1 })
+              : Type.String({ description: p.name, minLength: 1 });
+            break;
+          case "value-flag":
+            fieldSchema = Type.String({ description: p.name, minLength: 1 });
+            break;
+        }
         if (p.optional) {
           fieldSchema = Type.Optional(fieldSchema);
         }

@@ -2,17 +2,38 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import { reviseDraftDefinition } from "./draft.js";
-import { toolFormPanel, type ToolFormCallbacks, type ToolFormRejection, type ToolFormResult, type ToolFormState } from "./tool-form.js";
+import {
+  type ToolFormCallbacks,
+  type ToolFormRejection,
+  type ToolFormResult,
+  type ToolFormState,
+  toolFormPanel,
+} from "./tool-form.js";
 
-export interface PlaceholderInfo {
+export interface RegularPlaceholder {
+  kind: "regular";
   name: string;
   variadic: boolean;
   optional: boolean;
-  /** The flag string, e.g. `--verbose` or `-m`. Present only for flag placeholders. */
-  flag?: string;
-  /** True when the flag is boolean (no value param). */
-  boolean?: true;
 }
+
+export interface BooleanFlagPlaceholder {
+  kind: "boolean-flag";
+  name: string;
+  /** The flag string, e.g. `--verbose` or `-v`. */
+  flag: string;
+  optional: boolean;
+}
+
+export interface ValueFlagPlaceholder {
+  kind: "value-flag";
+  name: string;
+  /** The flag string, e.g. `--message` or `-m`. */
+  flag: string;
+  optional: boolean;
+}
+
+export type PlaceholderInfo = RegularPlaceholder | BooleanFlagPlaceholder | ValueFlagPlaceholder;
 
 /** Regex matching flag placeholders. Returns a new instance (with `g` flag) each call. */
 export const FLAG_PLACEHOLDER_RE = () => /\{\{(-{1,2}[\w-]+)(?:\s+([\w]+)(\?)?)?\s*(\?)?\}\}/g;
@@ -39,24 +60,24 @@ export function parsePlaceholders(command: string): PlaceholderInfo[] {
       const optional = valueOptMark === "?";
       const existing = seen.get(name);
       if (existing) {
-        if (existing.boolean || existing.optional !== optional || existing.flag !== flagStr) {
+        if (existing.kind !== "value-flag" || existing.optional !== optional || existing.flag !== flagStr) {
           throw new Error(`Conflicting modifiers for placeholder: ${name}`);
         }
         continue;
       }
-      seen.set(name, { name, variadic: false, optional, flag: flagStr });
+      seen.set(name, { kind: "value-flag", name, flag: flagStr, optional });
     } else {
       // Boolean flag: param name is the flag stripped of leading dashes
       const name = flagStr.replace(/^-+/, "");
       const optional = boolOptMark === "?";
       const existing = seen.get(name);
       if (existing) {
-        if (!existing.boolean || existing.optional !== optional || existing.flag !== flagStr) {
+        if (existing.kind !== "boolean-flag" || existing.optional !== optional || existing.flag !== flagStr) {
           throw new Error(`Conflicting modifiers for placeholder: ${name}`);
         }
         continue;
       }
-      seen.set(name, { name, variadic: false, optional, flag: flagStr, boolean: true });
+      seen.set(name, { kind: "boolean-flag", name, flag: flagStr, optional });
     }
   }
 
@@ -68,12 +89,12 @@ export function parsePlaceholders(command: string): PlaceholderInfo[] {
     const optional = m[3] === "?";
     const existing = seen.get(name);
     if (existing) {
-      if (existing.flag !== undefined || existing.variadic !== variadic || existing.optional !== optional) {
+      if (existing.kind !== "regular" || existing.variadic !== variadic || existing.optional !== optional) {
         throw new Error(`Conflicting modifiers for placeholder: ${name}`);
       }
       continue;
     }
-    seen.set(name, { name, variadic, optional });
+    seen.set(name, { kind: "regular", name, variadic, optional });
   }
 
   return [...seen.values()];

@@ -176,10 +176,10 @@ export function toolFormPanel(
         placeholders.length > 0
           ? placeholders
               .map((p) => {
-                if (p.flag) {
-                  if (p.boolean) {
-                    return `${p.flag}${p.optional ? "?" : ""}`;
-                  }
+                if (p.kind === "boolean-flag") {
+                  return `${p.flag}${p.optional ? "?" : ""}`;
+                }
+                if (p.kind === "value-flag") {
                   return `${p.flag} ${p.name}${p.optional ? "?" : ""}`;
                 }
                 const prefix = p.variadic ? "..." : "";

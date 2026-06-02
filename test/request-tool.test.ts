@@ -30,30 +30,30 @@ describe("extractPlaceholders", () => {
 
 describe("parsePlaceholders", () => {
   it("parses plain placeholder as required string", () => {
-    expect(parsePlaceholders("echo {{name}}")).toEqual([{ name: "name", variadic: false, optional: false }]);
+    expect(parsePlaceholders("echo {{name}}")).toEqual([{ kind: "regular", name: "name", variadic: false, optional: false }]);
   });
 
   it("parses optional placeholder", () => {
-    expect(parsePlaceholders("echo {{name?}}")).toEqual([{ name: "name", variadic: false, optional: true }]);
+    expect(parsePlaceholders("echo {{name?}}")).toEqual([{ kind: "regular", name: "name", variadic: false, optional: true }]);
   });
 
   it("parses variadic placeholder", () => {
-    expect(parsePlaceholders("run {{...args}}")).toEqual([{ name: "args", variadic: true, optional: false }]);
+    expect(parsePlaceholders("run {{...args}}")).toEqual([{ kind: "regular", name: "args", variadic: true, optional: false }]);
   });
 
   it("parses variadic optional placeholder", () => {
-    expect(parsePlaceholders("run {{...args?}}")).toEqual([{ name: "args", variadic: true, optional: true }]);
+    expect(parsePlaceholders("run {{...args?}}")).toEqual([{ kind: "regular", name: "args", variadic: true, optional: true }]);
   });
 
   it("parses mixed placeholders", () => {
     expect(parsePlaceholders("cmd {{key}} {{...fields?}}")).toEqual([
-      { name: "key", variadic: false, optional: false },
-      { name: "fields", variadic: true, optional: true },
+      { kind: "regular", name: "key", variadic: false, optional: false },
+      { kind: "regular", name: "fields", variadic: true, optional: true },
     ]);
   });
 
   it("deduplicates by name", () => {
-    expect(parsePlaceholders("cp {{file}} {{file}}")).toEqual([{ name: "file", variadic: false, optional: false }]);
+    expect(parsePlaceholders("cp {{file}} {{file}}")).toEqual([{ kind: "regular", name: "file", variadic: false, optional: false }]);
   });
 
   it("throws on conflicting modifiers for same name", () => {
@@ -66,7 +66,7 @@ describe("parsePlaceholders", () => {
 
   it("allows identical duplicate modifiers", () => {
     expect(parsePlaceholders("run {{...args?}} and {{...args?}}")).toEqual([
-      { name: "args", variadic: true, optional: true },
+      { kind: "regular", name: "args", variadic: true, optional: true },
     ]);
   });
 });
