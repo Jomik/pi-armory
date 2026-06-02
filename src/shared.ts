@@ -1,8 +1,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import { reviseDraftDefinition } from "./draft.js";
-import type { ToolFormResult } from "./tool-form.js";
+import { toolFormPanel, type ToolFormCallbacks, type ToolFormRejection, type ToolFormResult, type ToolFormState } from "./tool-form.js";
 
 export interface PlaceholderInfo {
   name: string;
@@ -138,4 +138,32 @@ export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTo
     ...(opts?.env ? { env: opts.env } : {}),
     ...(opts?.secrets ? { secrets: opts.secrets } : {}),
   };
+}
+
+interface ShowToolEditorContext {
+  modelRegistry: ModelRegistry;
+  model?: unknown;
+  ui: Pick<ExtensionUIContext, "custom">;
+}
+
+export async function showToolEditor(
+  ctx: ShowToolEditorContext,
+  initialState: ToolFormState,
+  draftModelName?: string,
+): Promise<ToolFormResult | ToolFormRejection> {
+  let draftModel: Model<Api> | undefined;
+  if (draftModelName) {
+    draftModel = resolveModel(ctx.modelRegistry, draftModelName);
+  }
+  if (!draftModel) {
+    draftModel = ctx.model as Model<Api> | undefined;
+  }
+
+  const dm = draftModel;
+  return ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
+    const callbacks: ToolFormCallbacks = {
+      onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
+    };
+    return toolFormPanel(tui, theme, done, initialState, callbacks);
+  });
 }

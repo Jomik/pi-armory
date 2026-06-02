@@ -1,11 +1,10 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
 import { approvalRegistry, registerArmoryTool } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
-import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
-import { type ToolFormRejection, type ToolFormResult, toolFormPanel } from "./tool-form.js";
+import { buildToolFromResult, showToolEditor } from "./shared.js";
+import { type ToolFormRejection, type ToolFormResult } from "./tool-form.js";
 
 export interface ArmoryCommandDeps {
   tools: ArmoryTool[];
@@ -106,35 +105,19 @@ async function handleEdit(
 
   const { tool, source } = found;
 
-  // Resolve draft model — same pattern as request-tool.ts
-  let draftModel: Model<Api> | undefined;
-  if (deps.draftModelName) {
-    draftModel = resolveModel(ctx.modelRegistry, deps.draftModelName);
-  }
-  if (!draftModel) {
-    draftModel = ctx.model as Model<Api> | undefined;
-  }
-
-  const dm = draftModel;
-  const result = await ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
-    return toolFormPanel(
-      tui,
-      theme,
-      done,
-      {
-        title: "Edit Tool",
-        name: tool.name,
-        command: tool.command,
-        description: tool.description,
-        guidelines: tool.guidelines ?? [],
-        requiresApproval: tool.requires_approval ?? false,
-        destination: source,
-      },
-      {
-        onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
-      },
-    );
-  });
+  const result = await showToolEditor(
+    ctx,
+    {
+      title: "Edit Tool",
+      name: tool.name,
+      command: tool.command,
+      description: tool.description,
+      guidelines: tool.guidelines ?? [],
+      requiresApproval: tool.requires_approval ?? false,
+      destination: source,
+    },
+    deps.draftModelName,
+  );
 
   if ("rejected" in result) return; // user rejected
 

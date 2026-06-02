@@ -5,11 +5,11 @@ import { Type } from "typebox";
 import { saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool } from "./register-tool.js";
-import { buildToolFromResult, makeRedraftCallback, resolveModel } from "./shared.js";
+import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
 
 export { extractPlaceholders } from "./shared.js";
 
-import { type ToolFormCallbacks, type ToolFormRejection, type ToolFormResult, toolFormPanel } from "./tool-form.js";
+import { type ToolFormRejection, type ToolFormResult } from "./tool-form.js";
 
 const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
@@ -97,26 +97,18 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         throw new Error(`Draft rejected${reason}`);
       }
 
-      const result = await ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
-        const dm = draftModel;
-        const formCallbacks: ToolFormCallbacks = {
-          onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
-        };
-        return toolFormPanel(
-          tui,
-          theme,
-          done,
-          {
-            name: drafted?.name ?? "",
-            command: drafted?.command ?? params.command,
-            description: drafted?.description ?? params.reasoning,
-            guidelines: drafted?.guidelines ?? [],
-            requiresApproval: drafted?.requires_approval ?? false,
-            destination: drafted?.destination ?? "project",
-          },
-          formCallbacks,
-        );
-      });
+      const result = await showToolEditor(
+        ctx,
+        {
+          name: drafted?.name ?? "",
+          command: drafted?.command ?? params.command,
+          description: drafted?.description ?? params.reasoning,
+          guidelines: drafted?.guidelines ?? [],
+          requiresApproval: drafted?.requires_approval ?? false,
+          destination: drafted?.destination ?? "project",
+        },
+        draftModelName,
+      );
 
       if ("rejected" in result) {
         const reason = result.reason ? `: ${result.reason}` : "";

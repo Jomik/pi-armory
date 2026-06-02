@@ -7,8 +7,6 @@ import { ArmoryConfigSchema } from "./schema.js";
 
 export type { ArmoryConfig, ArmoryTool } from "./schema.js";
 
-const EMPTY_CONFIG: ArmoryConfig = { tools: [] };
-
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: unknown }).code === "ENOENT";
 }
@@ -29,17 +27,11 @@ function parseToolsJson(content: string, filePath: string, onInvalid: string): A
     );
     return null;
   }
-  return parsed as ArmoryConfig;
+  return parsed;
 }
 
-function resolveConfigPath(
-  destination: "project" | "global",
-  projectRoot: string,
-  agentDir: string,
-): string {
-  return destination === "project"
-    ? path.join(projectRoot, ".pi", "armory.json")
-    : path.join(agentDir, "armory.json");
+function resolveConfigPath(destination: "project" | "global", projectRoot: string, agentDir: string): string {
+  return destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(agentDir, "armory.json");
 }
 
 async function readConfigFile(filePath: string): Promise<ArmoryConfig> {
@@ -47,10 +39,10 @@ async function readConfigFile(filePath: string): Promise<ArmoryConfig> {
   try {
     content = await readFile(filePath, "utf-8");
   } catch (err: unknown) {
-    if (isEnoent(err)) return { ...EMPTY_CONFIG };
+    if (isEnoent(err)) return { tools: [] };
     throw err;
   }
-  return parseToolsJson(content, filePath, "ignoring") ?? { ...EMPTY_CONFIG };
+  return parseToolsJson(content, filePath, "ignoring") ?? { tools: [] };
 }
 
 async function writeConfigFile(filePath: string, config: ArmoryConfig): Promise<void> {
@@ -65,10 +57,7 @@ export async function loadConfig(
   const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
-  const [globalResult, projectResult] = await Promise.all([
-    readConfigFile(globalPath),
-    readConfigFile(projectPath),
-  ]);
+  const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
   const merged = new Map<string, ArmoryTool>();
   for (const tool of globalResult.tools) {
@@ -96,10 +85,7 @@ export async function loadToolWithSource(
   const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
-  const [globalResult, projectResult] = await Promise.all([
-    readConfigFile(globalPath),
-    readConfigFile(projectPath),
-  ]);
+  const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
   // Project overrides global
   const projectTool = projectResult.tools.find((t) => t.name === name);
@@ -120,6 +106,7 @@ export async function removeFromConfig(
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
   const tools = config.tools.filter((t) => t.name !== toolName);
+  if (tools.length === config.tools.length) return; // nothing to remove
   await writeConfigFile(filePath, { ...config, tools });
 }
 
