@@ -1,27 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { parsePlaceholders } from "./shared.js";
-
-export interface ToolFormState {
-  /** Optional title shown at top of form. Defaults to "Request Tool". */
-  title?: string;
-  name: string;
-  command: string;
-  description: string;
-  guidelines: string[];
-  requiresApproval: boolean;
-  destination: "project" | "global";
-}
-
-export interface ToolFormCallbacks {
-  onRedraft?: (current: ToolFormResult, instruction: string) => Promise<Partial<ToolFormResult> | null>;
-}
-
-export interface ToolFormRejection {
-  rejected: true;
-  reason: string;
-}
+import { parsePlaceholders } from "./placeholders.js";
 
 export interface ToolFormResult {
   name: string;
@@ -30,6 +10,20 @@ export interface ToolFormResult {
   guidelines: string[];
   requiresApproval: boolean;
   destination: "project" | "global";
+}
+
+export type ToolFormState = ToolFormResult & {
+  /** Optional title shown at top of form. Defaults to "Request Tool". */
+  title?: string;
+};
+
+export interface ToolFormCallbacks {
+  onRedraft?: (current: ToolFormResult, instruction: string) => Promise<Partial<ToolFormResult> | null>;
+}
+
+export interface ToolFormRejection {
+  rejected: true;
+  reason: string;
 }
 
 export function toolFormPanel(

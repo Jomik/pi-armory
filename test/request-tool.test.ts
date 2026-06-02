@@ -93,9 +93,7 @@ describe("parsePlaceholders", () => {
   });
 
   it("parses short boolean flag placeholder", () => {
-    expect(parsePlaceholders("cmd {{-v}}")).toEqual([
-      { kind: "boolean-flag", name: "v", flag: "-v", optional: false },
-    ]);
+    expect(parsePlaceholders("cmd {{-v}}")).toEqual([{ kind: "boolean-flag", name: "v", flag: "-v", optional: false }]);
   });
 
   it("parses value flag placeholder", () => {
