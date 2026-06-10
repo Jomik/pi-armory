@@ -141,10 +141,12 @@ export async function draftToolDefinition(
 export interface ReviseInput {
   current: DraftOutput;
   instruction?: string;
+  originalRequest?: DraftInput;
 }
 
 const REVISE_PROMPT = `You are improving an existing tool definition for a coding agent's armory.
-Given the current definition and an optional instruction, produce an improved version.
+Given the current definition, optional original request context, and optional user requirement/request/prompt, produce an improved version.
+Use the original request to preserve the user's intent and any provided command/script context while applying the latest user requirement.
 Follow the same field rules as the original (snake_case name, no cd, etc.).
 Allowed destinations are "session", "project", and "global".
 
@@ -177,9 +179,16 @@ export async function reviseDraftDefinition(
   signal?: AbortSignal,
 ): Promise<DraftOutput> {
   const currentJson = JSON.stringify(input.current, null, 2);
-  const userMessage = `Current definition:\n${currentJson}${
-    input.instruction ? `\n\nInstruction: ${input.instruction}` : ""
-  }`;
+  let userMessage = `Current definition:\n${currentJson}`;
+  if (input.originalRequest) {
+    userMessage += `\n\nOriginal request:\nCommand: ${input.originalRequest.command}\nReasoning: ${input.originalRequest.reasoning}`;
+    if (input.originalRequest.context) {
+      userMessage += `\nContext:\n${input.originalRequest.context}`;
+    }
+  }
+  if (input.instruction) {
+    userMessage += `\n\nUser requirement/request/prompt: ${input.instruction}`;
+  }
 
   let text = "";
   const stream = streamSimple(

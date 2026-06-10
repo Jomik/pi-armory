@@ -106,6 +106,11 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           destination: drafted?.destination ?? "session",
         },
         draftModelName,
+        {
+          command: params.command,
+          reasoning: params.reasoning,
+          ...(params.context ? { context: params.context } : {}),
+        },
       );
 
       if ("rejected" in result) {

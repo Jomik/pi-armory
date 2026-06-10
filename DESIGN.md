@@ -247,13 +247,16 @@ Human-initiated flow to revise existing tools, with optional AI assistance.
 
 Available in both `request_tool` and `/armory edit` forms:
 
-1. User navigates to the Re-draft field (via Tab) and presses Enter → inline instruction input appears: "Instruction (optional): ___"
-2. User types instruction (e.g. "add an env parameter", "make it global") or leaves blank
-3. Current form state is sent to the draft model as context, along with the instruction
+1. User navigates to the Re-draft field (via Tab) and presses Enter → inline instruction entry mode opens in the Re-draft field
+2. User types an instruction (e.g. "add an env parameter", "make it global") or leaves it blank
+3. The draft model receives:
+   - Current form state as a structured tool definition
+   - User requirement/request/prompt from the instruction entry, if provided
+   - Original `request_tool` input (`command`, `reasoning`, and optional `context`) when re-drafting a freshly requested tool
 4. LLM returns an updated definition; form fields update in place
 5. User can re-draft again, edit manually, or approve/reject
 
-The re-draft prompt includes the current definition as structured context (not just the raw command), so the model can make targeted improvements rather than starting from scratch.
+The re-draft prompt includes the current definition as structured context (not just the raw command). For `request_tool` forms it also carries forward the original request context, so the model can preserve intent and use provided script/file context while applying the latest user instruction. `/armory edit` forms do not have original request context, so they send only the current definition and instruction.
 
 ### Architecture
 
@@ -261,17 +264,19 @@ The re-draft prompt includes the current definition as structured context (not j
 - Both `request_tool` execute and `/armory edit` handler call into the same form
 - The form accepts an initial state (either from a fresh draft or from an existing tool)
 - The Re-draft field triggers an async re-draft; form shows a spinner while waiting, then updates
-- The draft function gains a new signature variant that accepts a full current definition + instruction (not just a raw command)
+- The draft function gains a revision signature that accepts a full current definition, optional instruction, and optional original request context (not just a raw command)
 
 ### Draft function for revisions
 
 New input shape alongside the existing one:
 
 ```
-{ current: DraftOutput, instruction?: string }
+{ current: DraftOutput, instruction?: string, originalRequest?: DraftInput }
 ```
 
-The system prompt for revisions is minimal: "Given a tool definition and an optional instruction, produce an improved version. Reply with ONLY a JSON object." The existing field rules apply implicitly since the model sees the structure.
+`originalRequest` is populated for re-drafts launched from the `request_tool` approval form and contains the agent's original `command`, `reasoning`, and optional `context`. It is omitted for `/armory edit` re-drafts.
+
+The revision system prompt is detailed: it describes current definition, optional original request context, optional user requirement/request/prompt, the allowed fields, placeholder syntax, and parameterization rules. It asks the model to return only a JSON object.
 
 ### Config write-back
 

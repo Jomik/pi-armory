@@ -1,6 +1,6 @@
 import { streamSimple } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import type { DraftOutput, DraftRejection, ReviseInput } from "../src/draft.js";
+import type { DraftInput, DraftOutput, DraftRejection, ReviseInput } from "../src/draft.js";
 import { deriveNameFromCommand, draftToolDefinition, reviseDraftDefinition } from "../src/draft.js";
 
 vi.mock("@earendil-works/pi-ai");
@@ -174,5 +174,91 @@ describe("draftToolDefinition", () => {
     expect(output.command).toBe("npm test");
     expect(output.name).toBeTruthy();
     expect(output.destination).toBe("session");
+  });
+});
+
+describe("reviseDraftDefinition — originalRequest plumbing", () => {
+  const current: DraftOutput = {
+    name: "run_tests",
+    command: "npm test",
+    description: "Run the test suite",
+    requires_approval: false,
+    guidelines: [],
+    destination: "project",
+  };
+
+  function captureUserMessage(): string {
+    const calls = mockStreamSimple.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    // biome-ignore lint/suspicious/noExplicitAny: accessing mock call args
+    return (lastCall[1] as any).messages[0].content as string;
+  }
+
+  it("includes originalRequest command and reasoning in the user message", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    const originalRequest: DraftInput = {
+      command: "npm test",
+      reasoning: "We need a reliable way to run tests in CI",
+    };
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current, originalRequest });
+    const msg = captureUserMessage();
+    expect(msg).toContain("Original request:");
+    expect(msg).toContain("Command: npm test");
+    expect(msg).toContain("Reasoning: We need a reliable way to run tests in CI");
+  });
+
+  it("includes originalRequest context in the user message when provided", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    const originalRequest: DraftInput = {
+      command: "./scripts/build.sh",
+      reasoning: "Custom build script",
+      context: "#!/bin/bash\necho building...",
+    };
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current, originalRequest });
+    const msg = captureUserMessage();
+    expect(msg).toContain("Original request:");
+    expect(msg).toContain("Command: ./scripts/build.sh");
+    expect(msg).toContain("Reasoning: Custom build script");
+    expect(msg).toContain("Context:");
+    expect(msg).toContain("#!/bin/bash");
+  });
+
+  it("does not include an Original request section when originalRequest is absent", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+    const msg = captureUserMessage();
+    expect(msg).not.toContain("Original request:");
+  });
+
+  it("includes the user instruction under 'User requirement/request/prompt'", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    const originalRequest: DraftInput = { command: "npm test", reasoning: "run tests" };
+    await reviseDraftDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      {
+        current,
+        instruction: "Add a --watch flag",
+        originalRequest,
+      },
+    );
+    const msg = captureUserMessage();
+    expect(msg).toContain("User requirement/request/prompt: Add a --watch flag");
+  });
+
+  it("includes instruction without originalRequest (armory edit path)", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current, instruction: "Make it quieter" });
+    const msg = captureUserMessage();
+    expect(msg).toContain("User requirement/request/prompt: Make it quieter");
+    expect(msg).not.toContain("Original request:");
+  });
+
+  it("includes current definition JSON in the user message", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+    const msg = captureUserMessage();
+    expect(msg).toContain("Current definition:");
+    expect(msg).toContain('"name": "run_tests"');
   });
 });
