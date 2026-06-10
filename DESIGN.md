@@ -1,5 +1,23 @@
 # pi-armory Design
 
+## Tool destinations
+
+Tools have three possible destinations:
+
+- **Session** — registered in-memory only for the current session; not saved to any config file; lost when the session ends. This is the fallback destination for newly proposed tools when no draft model is configured or the draft does not choose a destination.
+- **Project** — saved to `.pi/armory.json` in the current project root; available to the current project on the next turn.
+- **Global** — saved to `~/.pi/agent/armory.json`; available in all projects on the next turn.
+
+At startup, tools are loaded from project and global config (project overrides global). Session tools are registered in-memory during the session and are accessible for editing, promotion, or deletion via `/armory edit` and `/armory delete` just like persisted tools.
+
+### Session registry
+
+`sessionRegistry` (a `Map<string, ArmoryTool>`) tracks all session-origin tools in `register-tool.ts`. It is populated when:
+1. `request_tool` approves a tool with destination `session`.
+2. `/armory edit` demotes a persisted tool to session.
+
+The registry is never persisted. Resolution order for edit/delete is: session > project > global.
+
 ## Core Design
 
 - Tools are shell commands with optional `{{param}}` template parameters
@@ -32,7 +50,7 @@
 - Separate config file (not in pi settings.json), consistent with pi-imps/pi-errands/pi-inquisitor
 - `checks` is just another tool in the armory (e.g. `{ "name": "checks", "command": "npm test && npm run typecheck" }`)
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
-- Armory removes `bash` from the active tool set by default (`disableBash: true` in global config). Set `disableBash: false` in global config to disable.
+- Armory removes `bash` from the active tool set by default (`disableBash: true` in global config). Set `disableBash: false` in global config to keep `bash` active; project-local `disableBash` is ignored.
 
 ## Config merging
 
@@ -189,15 +207,17 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
    - Edit name, command, description inline
    - Add/remove guidelines
    - Toggle `requires_approval`
-   - Choose destination: project-local (default) or global
+   - Choose destination: session (default), project-local, or global
    - Approve or reject (with optional reason)
-5. On approve, the tool is written to the chosen config file and available next turn
+5. On approve, the tool is registered and available next turn
+   - Session tools are stored in the in-memory session registry only
+   - Project/global tools are written to the chosen config file
 6. On reject, the agent receives `"User rejected: <reason>"` and can adjust and retry
 
 ## `requires_approval` execution flow
 
 1. Agent calls a tool that has `requires_approval: true`
-2. A minimal confirm/reject TUI is shown displaying the command about to run
+2. A minimal confirm/reject TUI is shown displaying the command template and provided parameter values
 3. Human approves → command executes, output returned to agent
 4. Human rejects → agent gets a rejection message, command does not run
 
@@ -215,12 +235,13 @@ Human-initiated flow to revise existing tools, with optional AI assistance.
 
 ### Flow
 
-1. `/armory edit [name]` — if name omitted, show a select list of all registered tools
-2. Load the tool's current definition from config (respecting project-overrides-global)
+1. `/armory edit [name]` — if name omitted, show a select list of all registered tools (session, project, global)
+2. Load the tool's current definition using session > project > global precedence
 3. Open the same TUI form used by `request_tool`, pre-populated with current values
 4. Human edits fields directly, or navigates to the Re-draft field and presses Enter to invoke AI re-draft
-5. On approve, save back (to whichever config file it came from, unless destination is toggled)
-6. On reject, no changes
+5. If the destination changed, show a confirmation describing the persistence/scope consequence
+6. On approve, save back to the selected destination
+7. On reject or cancelled scope-change confirmation, no changes
 
 ### AI re-draft
 
@@ -255,10 +276,26 @@ The system prompt for revisions is minimal: "Given a tool definition and an opti
 ### Config write-back
 
 When editing an existing tool:
-- Default destination = where the tool was loaded from (project or global)
-- If the user toggles destination, save to the new location
+- Default destination = where the tool was loaded from (session, project, or global)
+- If the user toggles destination, require confirmation before applying changes
+- If moving from session → project/global, write to the chosen config and remove from the session registry
+- If moving from project/global → session, remove from the source config and keep the tool only in the session registry
 - If moving from global → project, the project version overrides (existing merge semantics)
 - If moving from project → global, remove from project config to avoid shadowing
+- If renaming/removing a higher-precedence tool reveals a lower-precedence persisted tool with the old name, re-register the revealed tool instead of deactivating the name
+
+## Deleting tools (`/armory delete`)
+
+Human-initiated flow to remove existing tools.
+
+1. `/armory delete [name]` — if name omitted, show a select list of all registered tools (session, project, global)
+2. Resolve using session > project > global precedence
+3. Show a confirmation describing what will be removed
+4. On confirmation:
+   - Session tools are removed from the in-memory registry
+   - Project tools are removed from `.pi/armory.json`
+   - Global tools are removed from `~/.pi/agent/armory.json`
+5. The deleted tool is deactivated for the current session unless removing it reveals a lower-precedence persisted tool with the same name
 
 ## Why
 

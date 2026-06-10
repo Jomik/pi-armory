@@ -185,9 +185,14 @@ async function resolveToolEnvironment(
 /** Tools with requires_approval, keyed by name. Updated by registerArmoryTool. */
 export const approvalRegistry = new Map<string, ArmoryTool>();
 
+/** In-memory registry of session-only tools (not persisted to config). */
+export const sessionRegistry = new Map<string, ArmoryTool>();
+
 export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
+  } else {
+    approvalRegistry.delete(tool.name);
   }
   const schema = buildParamSchema(tool);
 
