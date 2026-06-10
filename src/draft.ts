@@ -20,7 +20,11 @@ export interface DraftOutput {
   description: string;
   requires_approval: boolean;
   guidelines: string[];
-  destination: "project" | "global";
+  destination: "project" | "global" | "session";
+}
+
+function parseDestination(value: unknown, fallback: DraftOutput["destination"]): DraftOutput["destination"] {
+  return value === "session" || value === "project" || value === "global" ? value : fallback;
 }
 
 const SYSTEM_PROMPT = `You are defining a shell-command tool for a coding agent's armory.
@@ -35,7 +39,7 @@ Otherwise, produce a tool definition with these fields:
 - description: one sentence explaining what the tool does.
 - requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
 - guidelines: ultra-short hints (≤8 words each). Only if genuinely non-obvious; prefer [].
-- destination: "global" for general-purpose tools usable in any project, "project" for repo-specific scripts/conventions.
+- destination: "session" for one-off tools only needed in the current conversation, "project" for repo-specific scripts/conventions, "global" for general-purpose tools usable in any project.
 
 Placeholder syntax:
 - {{name}} — required single value (type "string")
@@ -116,7 +120,7 @@ export async function draftToolDefinition(
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : [],
-        destination: obj.destination === "global" ? "global" : "project",
+        destination: parseDestination(obj.destination, "session"),
       };
     }
   } catch {
@@ -130,18 +134,21 @@ export async function draftToolDefinition(
     description: input.command,
     requires_approval: false,
     guidelines: [],
-    destination: "project",
+    destination: "session",
   };
 }
 
 export interface ReviseInput {
   current: DraftOutput;
   instruction?: string;
+  originalRequest?: DraftInput;
 }
 
 const REVISE_PROMPT = `You are improving an existing tool definition for a coding agent's armory.
-Given the current definition and an optional instruction, produce an improved version.
+Given the current definition, optional original request context, and optional user requirement/request/prompt, produce an improved version.
+Use the original request to preserve the user's intent and any provided command/script context while applying the latest user requirement.
 Follow the same field rules as the original (snake_case name, no cd, etc.).
+Allowed destinations are "session", "project", and "global".
 
 Placeholder syntax in the command field:
 - {{name}} — required single value
@@ -172,9 +179,16 @@ export async function reviseDraftDefinition(
   signal?: AbortSignal,
 ): Promise<DraftOutput> {
   const currentJson = JSON.stringify(input.current, null, 2);
-  const userMessage = `Current definition:\n${currentJson}${
-    input.instruction ? `\n\nInstruction: ${input.instruction}` : ""
-  }`;
+  let userMessage = `Current definition:\n${currentJson}`;
+  if (input.originalRequest) {
+    userMessage += `\n\nOriginal request:\nCommand: ${input.originalRequest.command}\nReasoning: ${input.originalRequest.reasoning}`;
+    if (input.originalRequest.context) {
+      userMessage += `\nContext:\n${input.originalRequest.context}`;
+    }
+  }
+  if (input.instruction) {
+    userMessage += `\n\nUser requirement/request/prompt: ${input.instruction}`;
+  }
 
   let text = "";
   const stream = streamSimple(
@@ -209,7 +223,7 @@ export async function reviseDraftDefinition(
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : input.current.guidelines,
-        destination: obj.destination === "global" ? "global" : input.current.destination,
+        destination: parseDestination(obj.destination, input.current.destination),
       };
     }
   } catch {

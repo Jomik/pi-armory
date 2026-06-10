@@ -1,6 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
+import type { DraftInput } from "./draft.js";
 import { reviseDraftDefinition } from "./draft.js";
 import {
   type ToolFormCallbacks,
@@ -31,6 +32,7 @@ export function resolveModel(registry: ModelRegistry, name: string): Model<Api> 
 export function makeRedraftCallback(
   ctx: { modelRegistry: ModelRegistry },
   model: Model<Api>,
+  originalRequest?: DraftInput,
 ): (current: ToolFormResult, instruction: string) => Promise<ToolFormResult | null> {
   return async (current, instruction) => {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -48,6 +50,7 @@ export function makeRedraftCallback(
           destination: current.destination,
         },
         instruction,
+        originalRequest,
       },
       undefined,
     );
@@ -91,6 +94,7 @@ export async function showToolEditor(
   ctx: ShowToolEditorContext,
   initialState: ToolFormState,
   draftModelName?: string,
+  originalRequest?: DraftInput,
 ): Promise<ToolFormResult | ToolFormRejection> {
   let draftModel: Model<Api> | undefined;
   if (draftModelName) {
@@ -103,7 +107,7 @@ export async function showToolEditor(
   const dm = draftModel;
   return ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
     const callbacks: ToolFormCallbacks = {
-      onRedraft: dm ? makeRedraftCallback(ctx, dm) : undefined,
+      onRedraft: dm ? makeRedraftCallback(ctx, dm, originalRequest) : undefined,
     };
     return toolFormPanel(tui, theme, done, initialState, callbacks);
   });

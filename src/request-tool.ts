@@ -4,7 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
-import { registerArmoryTool } from "./register-tool.js";
+import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
 
 export { extractPlaceholders } from "./shared.js";
@@ -103,9 +103,14 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           description: drafted?.description ?? params.reasoning,
           guidelines: drafted?.guidelines ?? [],
           requiresApproval: drafted?.requires_approval ?? false,
-          destination: drafted?.destination ?? "project",
+          destination: drafted?.destination ?? "session",
         },
         draftModelName,
+        {
+          command: params.command,
+          reasoning: params.reasoning,
+          ...(params.context ? { context: params.context } : {}),
+        },
       );
 
       if ("rejected" in result) {
@@ -136,8 +141,14 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
 
       const tool = buildToolFromResult({ ...result, name });
 
-      await saveConfig(tool, result.destination, projectRoot);
+      if (result.destination !== "session") {
+        await saveConfig(tool, result.destination, projectRoot);
+        sessionRegistry.delete(tool.name);
+      }
       registerArmoryTool(pi, tool);
+      if (result.destination === "session") {
+        sessionRegistry.set(tool.name, tool);
+      }
 
       return {
         content: [

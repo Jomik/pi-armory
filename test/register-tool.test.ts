@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
 import { fetchSecret } from "../src/keychain.js";
-import { registerArmoryTool } from "../src/register-tool.js";
+import { approvalRegistry, registerArmoryTool } from "../src/register-tool.js";
 
 vi.mock("../src/executor.js");
 vi.mock("../src/keychain.js");
@@ -64,6 +64,7 @@ describe("registerArmoryTool", () => {
   beforeEach(() => {
     mockExecuteCommand.mockReset();
     mockFetchSecret.mockReset();
+    approvalRegistry.clear();
   });
 
   it("calls pi.registerTool with the correct name and description", () => {
@@ -132,6 +133,18 @@ describe("registerArmoryTool", () => {
     expect(ctx.ui.confirm).not.toHaveBeenCalled();
     expect(mockExecuteCommand).toHaveBeenCalledOnce();
     expect(result.content[0].text).toBe("done");
+  });
+
+  it("clears stale approval entries when re-registering a non-approval tool", () => {
+    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, approvalTool);
+    expect(approvalRegistry.has("approval-tool")).toBe(true);
+
+    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, {
+      ...approvalTool,
+      requires_approval: false,
+    });
+
+    expect(approvalRegistry.has("approval-tool")).toBe(false);
   });
 
   it("passes an onUpdate wrapper to executeCommand that forwards updates", async () => {

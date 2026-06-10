@@ -6,6 +6,7 @@ import type { ArmoryConfig, ArmoryTool } from "./schema.js";
 import { ArmoryConfigSchema } from "./schema.js";
 
 export type { ArmoryConfig, ArmoryTool } from "./schema.js";
+export type ToolSource = "project" | "global" | "session";
 
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: unknown }).code === "ENOENT";
