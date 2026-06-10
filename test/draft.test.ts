@@ -7,6 +7,16 @@ vi.mock("@earendil-works/pi-ai");
 
 const mockStreamSimple = vi.mocked(streamSimple);
 
+// biome-ignore lint/suspicious/noExplicitAny: test mock returning async generator
+function makeStream(json: string): any {
+  return (async function* () {
+    yield { type: "text_delta" as const, delta: json };
+  })();
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: stub model object for tests
+const fakeModel = {} as any;
+
 describe("deriveNameFromCommand", () => {
   it("extracts first word from a simple command", () => {
     expect(deriveNameFromCommand("echo hello")).toBe("echo");
@@ -67,6 +77,22 @@ describe("reviseDraftDefinition", () => {
     const input: ReviseInput = { current };
     expect(input.instruction).toBeUndefined();
   });
+
+  it("allows revision to switch destination to project", async () => {
+    const current: DraftOutput = {
+      name: "build",
+      command: "npm run build",
+      description: "Build the project",
+      requires_approval: false,
+      guidelines: [],
+      destination: "global",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ ...current, destination: "project" })));
+
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+
+    expect(result.destination).toBe("project");
+  });
 });
 
 describe("DraftRejection", () => {
@@ -78,16 +104,6 @@ describe("DraftRejection", () => {
 });
 
 describe("draftToolDefinition", () => {
-  // biome-ignore lint/suspicious/noExplicitAny: test mock returning async generator
-  function makeStream(json: string): any {
-    return (async function* () {
-      yield { type: "text_delta" as const, delta: json };
-    })();
-  }
-
-  // biome-ignore lint/suspicious/noExplicitAny: stub model object for tests
-  const fakeModel = {} as any;
-
   it("returns DraftRejection when model returns rejected:true with reason", async () => {
     mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ rejected: true, reason: "Need script contents" })));
     const result = await draftToolDefinition(
@@ -123,7 +139,26 @@ describe("draftToolDefinition", () => {
       { apiKey: "test" },
       { command: "npm test", reasoning: "run tests" },
     );
-    expect(result).toMatchObject({ name: "run_tests", command: "npm test" });
+    expect(result).toMatchObject({ name: "run_tests", command: "npm test", destination: "project" });
+    expect("rejected" in result).toBe(false);
+  });
+
+  it("accepts session as a drafted destination", async () => {
+    const toolDef = {
+      name: "run_tests",
+      command: "npm test",
+      description: "Run the test suite",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(toolDef)));
+    const result = await draftToolDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      { command: "npm test", reasoning: "run tests" },
+    );
+    expect(result).toMatchObject({ destination: "session" });
     expect("rejected" in result).toBe(false);
   });
 
@@ -138,5 +173,6 @@ describe("draftToolDefinition", () => {
     const output = result as DraftOutput;
     expect(output.command).toBe("npm test");
     expect(output.name).toBeTruthy();
+    expect(output.destination).toBe("session");
   });
 });

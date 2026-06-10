@@ -9,7 +9,7 @@ export interface ToolFormResult {
   description: string;
   guidelines: string[];
   requiresApproval: boolean;
-  destination: "project" | "global";
+  destination: "project" | "global" | "session";
 }
 
 export type ToolFormState = ToolFormResult & {
@@ -35,7 +35,7 @@ export function toolFormPanel(
 ): { invalidate(): void; render(width: number): string[]; handleInput(data: string): void } {
   let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=re-draft (if available)
   let requiresApproval = initialState.requiresApproval;
-  let destination: "project" | "global" = initialState.destination;
+  let destination: "project" | "global" | "session" = initialState.destination;
   let guidelines: string[] = initialState.guidelines;
   const title = initialState.title ?? "Request Tool";
   let mode: "normal" | "instruction" | "drafting" | "rejecting" = "normal";
@@ -196,10 +196,11 @@ export function toolFormPanel(
 
       // Destination toggle
       const destLabel = "Destination:".padEnd(LABEL);
+      const sessMark = destination === "session" ? "●" : "○";
       const projMark = destination === "project" ? "●" : "○";
       const globMark = destination === "global" ? "●" : "○";
       lines.push(
-        ` ${focus === 5 ? theme.fg("accent", destLabel) : theme.fg("muted", destLabel)} ${theme.fg("text", `${projMark} Project  ${globMark} Global`)}`,
+        ` ${focus === 5 ? theme.fg("accent", destLabel) : theme.fg("muted", destLabel)} ${theme.fg("text", `${sessMark} Session  ${projMark} Project  ${globMark} Global`)}`,
       );
 
       // Re-draft button (focus 6)
@@ -401,8 +402,11 @@ export function toolFormPanel(
 
       // Destination toggle
       if (focus === 5) {
-        if (matchesKey(data, Key.space) || matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
-          destination = destination === "project" ? "global" : "project";
+        if (matchesKey(data, Key.space) || matchesKey(data, Key.right)) {
+          destination = destination === "session" ? "project" : destination === "project" ? "global" : "session";
+          tui.requestRender();
+        } else if (matchesKey(data, Key.left)) {
+          destination = destination === "session" ? "global" : destination === "project" ? "session" : "project";
           tui.requestRender();
         }
         return;

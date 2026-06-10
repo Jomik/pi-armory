@@ -123,7 +123,9 @@ async function handleEdit(
   const updatedTool = buildToolFromResult(result, { env: tool.env, secrets: tool.secrets });
 
   // Save to new (or same) destination
-  await saveConfig(updatedTool, result.destination, deps.projectRoot);
+  if (result.destination !== "session") {
+    await saveConfig(updatedTool, result.destination, deps.projectRoot);
+  }
 
   // Remove old entry if destination or name changed (saveConfig upserts by name,
   // so we need to clean up the old name/location when either changes)

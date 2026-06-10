@@ -103,7 +103,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           description: drafted?.description ?? params.reasoning,
           guidelines: drafted?.guidelines ?? [],
           requiresApproval: drafted?.requires_approval ?? false,
-          destination: drafted?.destination ?? "project",
+          destination: drafted?.destination ?? "session",
         },
         draftModelName,
       );
@@ -136,7 +136,9 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
 
       const tool = buildToolFromResult({ ...result, name });
 
-      await saveConfig(tool, result.destination, projectRoot);
+      if (result.destination !== "session") {
+        await saveConfig(tool, result.destination, projectRoot);
+      }
       registerArmoryTool(pi, tool);
 
       return {

@@ -75,8 +75,8 @@ Agent calls: request_tool({
   context: "<contents of scripts/deploy.sh>"
 })
 → Draft model produces a full tool definition (or rejects if context is insufficient)
-→ Human sees a TUI form, can edit fields, add/remove guidelines, toggle approval, choose project/global
-→ On approve: tool is saved to config and available next turn
+→ Human sees a TUI form, can edit fields, add/remove guidelines, toggle approval, choose session/project/global
+→ On approve: session tools are registered in-memory; project/global tools are saved to config and available next turn
 → On reject: human can provide a reason that’s returned to the agent
 ```
 
