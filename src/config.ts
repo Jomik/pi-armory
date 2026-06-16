@@ -6,7 +6,8 @@ import type { ArmoryConfig, ArmoryTool } from "./schema.js";
 import { ArmoryConfigSchema } from "./schema.js";
 
 export type { ArmoryConfig, ArmoryTool } from "./schema.js";
-export type ToolSource = "project" | "global" | "session";
+export type PersistedToolSource = "project" | "global";
+export type ToolSource = PersistedToolSource | "session";
 
 function isEnoent(err: unknown): boolean {
   return err instanceof Error && "code" in err && (err as { code: unknown }).code === "ENOENT";
@@ -60,22 +61,44 @@ export async function loadConfig(
 
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
-  const merged = new Map<string, ArmoryTool>();
-  for (const tool of globalResult.tools) {
-    merged.set(tool.name, tool);
-  }
-  for (const tool of projectResult.tools) {
-    merged.set(tool.name, tool);
-  }
-
+  const merged = mergePersistedToolsWithSource(globalResult.tools, projectResult.tools);
   const draftModel = projectResult.draftModel ?? globalResult.draftModel;
   const disableBash = globalResult.disableBash ?? true;
 
   return {
-    tools: Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    tools: Array.from(merged.values())
+      .map(({ tool }) => tool)
+      .sort((a, b) => a.name.localeCompare(b.name)),
     ...(draftModel !== undefined ? { draftModel } : {}),
     disableBash,
   };
+}
+
+function mergePersistedToolsWithSource(
+  globalTools: ArmoryTool[],
+  projectTools: ArmoryTool[],
+): Map<string, { tool: ArmoryTool; source: PersistedToolSource }> {
+  const merged = new Map<string, { tool: ArmoryTool; source: PersistedToolSource }>();
+  for (const tool of globalTools) {
+    merged.set(tool.name, { tool, source: "global" });
+  }
+  for (const tool of projectTools) {
+    merged.set(tool.name, { tool, source: "project" });
+  }
+  return merged;
+}
+
+export async function loadToolsWithSource(
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<Array<{ tool: ArmoryTool; source: PersistedToolSource }>> {
+  const globalPath = path.join(agentDir, "armory.json");
+  const projectPath = path.join(projectRoot, ".pi", "armory.json");
+
+  const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
+  const merged = mergePersistedToolsWithSource(globalResult.tools, projectResult.tools);
+
+  return Array.from(merged.values()).sort((a, b) => a.tool.name.localeCompare(b.tool.name));
 }
 
 export async function loadToolWithSource(

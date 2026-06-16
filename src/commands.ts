@@ -1,6 +1,16 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import {
+  Container,
+  Key,
+  matchesKey,
+  type SelectItem,
+  SelectList,
+  Text,
+  type TUI,
+  truncateToWidth,
+} from "@earendil-works/pi-tui";
 import type { ArmoryTool, ToolSource } from "./config.js";
-import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
@@ -89,6 +99,23 @@ function allEditableTools(deps: ArmoryCommandDeps): ArmoryTool[] {
   return [...combined.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+type EditableToolEntry = { tool: ArmoryTool; source: ToolSource };
+type ToolPickerScope = ToolSource | "all";
+
+const TOOL_PICKER_SCOPES: ToolPickerScope[] = ["all", "session", "project", "global"];
+
+async function allEditableToolEntries(projectRoot: string): Promise<EditableToolEntry[]> {
+  const combined = new Map<string, EditableToolEntry>();
+  for (const entry of await loadToolsWithSource(projectRoot)) {
+    combined.set(entry.tool.name, entry);
+  }
+  // Session tools override persisted tools in the active session.
+  for (const [name, tool] of sessionRegistry) {
+    combined.set(name, { tool, source: "session" });
+  }
+  return [...combined.values()].sort((a, b) => a.tool.name.localeCompare(b.tool.name));
+}
+
 /** Resolve a tool by name, checking session → project → global. */
 async function resolveToolWithSource(
   name: string,
@@ -169,6 +196,153 @@ async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
   );
 }
 
+function scopeLabel(scope: ToolPickerScope): string {
+  return scope.charAt(0).toUpperCase() + scope.slice(1);
+}
+
+function sourceDescription(entry: EditableToolEntry): string {
+  const parts = [`[${entry.source}]`, entry.tool.description];
+  if (entry.tool.command) parts.push(`— ${entry.tool.command}`);
+  return parts.join(" ");
+}
+
+function pickerItems(entries: EditableToolEntry[], scope: ToolPickerScope): SelectItem[] {
+  return entries
+    .filter((entry) => scope === "all" || entry.source === scope)
+    .map((entry) => ({
+      value: entry.tool.name,
+      label: entry.tool.name,
+      description: sourceDescription(entry),
+    }));
+}
+
+function createToolPicker(
+  tui: TUI,
+  theme: Theme,
+  title: string,
+  entries: EditableToolEntry[],
+  done: (toolName: string | null) => void,
+) {
+  let scopeIndex = 0;
+  let filter = "";
+  let selectList = buildSelectList();
+
+  const container = new Container();
+
+  function currentScope(): ToolPickerScope {
+    return TOOL_PICKER_SCOPES[scopeIndex] ?? "all";
+  }
+
+  function buildSelectList(): SelectList {
+    const items = pickerItems(entries, currentScope());
+    const list = new SelectList(items, Math.min(items.length, 14), {
+      selectedPrefix: (text: string) => theme.fg("accent", text),
+      selectedText: (text: string) => theme.fg("accent", text),
+      description: (text: string) => theme.fg("muted", text),
+      scrollInfo: (text: string) => theme.fg("dim", text),
+      noMatch: (text: string) => theme.fg("warning", text),
+    });
+    list.setFilter(filter);
+    list.onSelect = (item) => done(item.value);
+    list.onCancel = () => done(null);
+    return list;
+  }
+
+  function rebuildList(): void {
+    selectList = buildSelectList();
+    container.invalidate();
+  }
+
+  function renderScopes(width: number): string {
+    const scopeText = TOOL_PICKER_SCOPES.map((scope, i) => {
+      const text = scopeLabel(scope);
+      return i === scopeIndex ? theme.fg("accent", theme.bold(text)) : theme.fg("muted", text);
+    }).join(theme.fg("dim", " | "));
+    return truncateToWidth(` ${scopeText}`, width);
+  }
+
+  return {
+    invalidate() {
+      container.invalidate();
+      selectList.invalidate();
+    },
+
+    render(width: number): string[] {
+      container.clear();
+      const maxW = Math.min(width, 110);
+      const hr = theme.fg("accent", "─".repeat(maxW));
+      container.addChild(new Text(hr, 0, 0));
+      container.addChild(new Text(` ${theme.fg("accent", theme.bold(title))}`, 0, 0));
+      container.addChild(new Text(renderScopes(maxW), 0, 0));
+      container.addChild(
+        new Text(` ${theme.fg("dim", filter ? `Filter: ${filter}` : "Type to filter by name")}`, 0, 0),
+      );
+      container.addChild(selectList);
+      container.addChild(
+        new Text(
+          theme.fg("dim", " ↑↓ navigate • tab scope • type filter • backspace clear • enter select • esc cancel"),
+          0,
+          0,
+        ),
+      );
+      container.addChild(new Text(hr, 0, 0));
+      return container.render(width).map((line) => truncateToWidth(line, width));
+    },
+
+    handleInput(data: string) {
+      if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
+        scopeIndex = (scopeIndex + 1) % TOOL_PICKER_SCOPES.length;
+        rebuildList();
+        tui.requestRender();
+        return;
+      }
+      if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
+        scopeIndex = (scopeIndex + TOOL_PICKER_SCOPES.length - 1) % TOOL_PICKER_SCOPES.length;
+        rebuildList();
+        tui.requestRender();
+        return;
+      }
+      if (matchesKey(data, Key.backspace) && filter.length > 0) {
+        filter = filter.slice(0, -1);
+        rebuildList();
+        tui.requestRender();
+        return;
+      }
+      if (matchesKey(data, Key.escape) && filter.length > 0) {
+        filter = "";
+        rebuildList();
+        tui.requestRender();
+        return;
+      }
+      if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) !== 127) {
+        filter += data;
+        rebuildList();
+        tui.requestRender();
+        return;
+      }
+      selectList.handleInput(data);
+      tui.requestRender();
+    },
+  };
+}
+
+async function pickEditableTool(
+  ctx: ExtensionCommandContext,
+  title: string,
+  entries: EditableToolEntry[],
+): Promise<string | null> {
+  const picked = await ctx.ui.custom<string | null | undefined>((tui, theme, _keybindings, done) =>
+    createToolPicker(tui, theme, title, entries, done),
+  );
+  if (picked !== undefined) return picked;
+
+  const selected = await ctx.ui.select(
+    title,
+    entries.map((entry) => entry.tool.name),
+  );
+  return selected ?? null;
+}
+
 async function handleEdit(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
@@ -178,16 +352,14 @@ async function handleEdit(
   // If no name, show a picker including session tools
   let selectedName = toolName;
   if (!selectedName) {
-    const all = allEditableTools(deps);
+    const all = await allEditableToolEntries(deps.projectRoot);
     if (all.length === 0) {
       ctx.ui.notify("No tools registered", "error");
       return;
     }
-    selectedName = await ctx.ui.select(
-      "Select tool to edit",
-      all.map((t) => t.name),
-    );
-    if (!selectedName) return;
+    const picked = await pickEditableTool(ctx, "Select tool to edit", all);
+    if (!picked) return;
+    selectedName = picked;
   }
 
   // Resolve from session → project → global
@@ -279,16 +451,14 @@ async function handleDelete(
   // If no name, show a picker including session tools
   let selectedName = toolName;
   if (!selectedName) {
-    const all = allEditableTools(deps);
+    const all = await allEditableToolEntries(deps.projectRoot);
     if (all.length === 0) {
       ctx.ui.notify("No tools registered", "error");
       return;
     }
-    selectedName = await ctx.ui.select(
-      "Select tool to delete",
-      all.map((t) => t.name),
-    );
-    if (!selectedName) return;
+    const picked = await pickEditableTool(ctx, "Select tool to delete", all);
+    if (!picked) return;
+    selectedName = picked;
   }
 
   // Resolve from session → project → global
