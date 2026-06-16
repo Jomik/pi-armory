@@ -9,7 +9,7 @@ import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
 
 export { extractPlaceholders } from "./shared.js";
 
-const RESERVED_NAMES = new Set(["request_tool"]);
+export const RESERVED_NAMES = new Set(["request_tool"]);
 export const VALID_NAME = /^[a-z][a-z0-9_]*$/;
 
 export function normalizeName(name: string): string {

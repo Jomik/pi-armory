@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool, ToolSource } from "./config.js";
 import { loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { SecretsPanel } from "./secrets-panel.js";
 import { buildToolFromResult, showToolEditor } from "./shared.js";
@@ -13,12 +14,13 @@ export interface ArmoryCommandDeps {
 
 export function registerArmoryCommand(pi: ExtensionAPI, deps: ArmoryCommandDeps): void {
   pi.registerCommand("armory", {
-    description: "Manage armory: /armory secrets | /armory edit [name] | /armory delete [name]",
+    description: "Manage armory: /armory secrets | /armory edit [name] | /armory delete [name] | /armory onboard",
     getArgumentCompletions(prefix) {
       const items = [
         { value: "secrets", label: "secrets", description: "Manage keychain secrets" },
         { value: "edit", label: "edit", description: "Edit an existing tool" },
         { value: "delete", label: "delete", description: "Delete a tool" },
+        { value: "onboard", label: "onboard", description: "Bootstrap project tools with AI assistance" },
       ];
 
       const allTools = allEditableTools(deps);
@@ -55,8 +57,10 @@ export function registerArmoryCommand(pi: ExtensionAPI, deps: ArmoryCommandDeps)
         await handleDelete(pi, ctx, deps, toolName);
       } else if (sub === "secrets") {
         await handleSecrets(ctx, deps.tools);
+      } else if (sub === "onboard") {
+        await handleOnboard(pi, ctx, deps.projectRoot, deps.draftModelName);
       } else {
-        ctx.ui.notify(`Unknown: ${sub}. Available: secrets, edit, delete`, "error");
+        ctx.ui.notify(`Unknown: ${sub}. Available: secrets, edit, delete, onboard`, "error");
       }
     },
   });
