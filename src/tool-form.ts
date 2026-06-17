@@ -65,6 +65,45 @@ export function toolFormPanel(
   descEditor.setText(initialState.description);
 
   const textEditors = [nameEditor, commandEditor, descEditor];
+  let guidelineSelection = guidelines.length; // 0..guidelines.length; length is the add-new row
+
+  function selectedGuidelineIndex(): number | null {
+    return guidelineSelection >= 0 && guidelineSelection < guidelines.length ? guidelineSelection : null;
+  }
+
+  function selectGuideline(index: number) {
+    guidelineSelection = Math.max(0, Math.min(index, guidelines.length));
+    const selected = selectedGuidelineIndex();
+    guidelinesEditor.setText(selected === null ? "" : (guidelines[selected] ?? ""));
+  }
+
+  function deleteGuideline(index: number) {
+    guidelines = guidelines.filter((_, i) => i !== index);
+    selectGuideline(Math.min(index, guidelines.length));
+  }
+
+  function commitGuidelinesEditor(): "appended" | "deleted" | "none" | "updated" {
+    const text = guidelinesEditor.getText().trim();
+    const selected = selectedGuidelineIndex();
+
+    if (selected !== null) {
+      if (text) {
+        guidelines = guidelines.map((guideline, i) => (i === selected ? text : guideline));
+        guidelinesEditor.setText(text);
+        return "updated";
+      }
+      deleteGuideline(selected);
+      return "deleted";
+    }
+
+    if (text) {
+      guidelines = [...guidelines, text];
+      selectGuideline(guidelines.length);
+      return "appended";
+    }
+
+    return "none";
+  }
 
   function currentResult(): ToolFormResult {
     return {
@@ -134,20 +173,32 @@ export function toolFormPanel(
       if (focus === 3) {
         for (let i = 0; i < guidelines.length; i++) {
           const prefix = i === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
-          const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
-          for (let j = 0; j < wrapped.length; j++) {
-            lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
+          if (guidelineSelection === i) {
+            const edLines = guidelinesEditor.render(Math.max(fieldWidth - 2, 8));
+            const edMid = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
+            for (let j = 0; j < edLines.length; j++) {
+              lines.push(` ${j === edMid ? prefix : " ".repeat(LABEL)} - ${edLines[j]}`);
+            }
+          } else {
+            const wrapped = wrapTextWithAnsi(theme.fg("text", `- ${guidelines[i]}`), fieldWidth);
+            for (let j = 0; j < wrapped.length; j++) {
+              lines.push(` ${j === 0 ? prefix : " ".repeat(LABEL)} ${wrapped[j]}`);
+            }
           }
         }
-        const edLines = guidelinesEditor.render(fieldWidth);
-        const edMid = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
-        for (let j = 0; j < edLines.length; j++) {
-          if (j === edMid) {
-            const prefix = guidelines.length === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
-            lines.push(` ${prefix} ${edLines[j]}`);
-          } else {
-            lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
+        if (guidelineSelection === guidelines.length) {
+          const edLines = guidelinesEditor.render(fieldWidth);
+          const edMid = edLines.length > 1 ? Math.floor(edLines.length / 2) : 0;
+          for (let j = 0; j < edLines.length; j++) {
+            if (j === edMid) {
+              const prefix = guidelines.length === 0 ? theme.fg("accent", guidelinesLabel) : " ".repeat(LABEL);
+              lines.push(` ${prefix} ${edLines[j]}`);
+            } else {
+              lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
+            }
           }
+        } else {
+          lines.push(` ${" ".repeat(LABEL)} ${theme.fg("dim", "+ new guideline")}`);
         }
       } else if (guidelines.length === 0) {
         lines.push(` ${theme.fg("muted", guidelinesLabel)} ${theme.fg("dim", "(none)")}`);
@@ -253,7 +304,7 @@ export function toolFormPanel(
         if (focus < 3) {
           hint = "Enter next field  •  Esc reject  •  Tab next field";
         } else if (focus === 3) {
-          hint = "Enter add guideline  •  Backspace remove last  •  Esc reject  •  Tab next field";
+          hint = "Enter save/add  •  ↑↓ edit prior  •  Delete remove selected  •  Esc reject  •  Tab next field";
         } else if (focus === 6) {
           hint = "Enter re-draft  •  Esc reject  •  Tab next field";
         } else {
@@ -291,7 +342,10 @@ export function toolFormPanel(
                 if (result.name !== undefined) nameEditor.setText(result.name);
                 if (result.command !== undefined) commandEditor.setText(result.command);
                 if (result.description !== undefined) descEditor.setText(result.description);
-                if (result.guidelines !== undefined) guidelines = result.guidelines;
+                if (result.guidelines !== undefined) {
+                  guidelines = result.guidelines;
+                  selectGuideline(guidelines.length);
+                }
                 if (result.requiresApproval !== undefined) requiresApproval = result.requiresApproval;
                 if (result.destination !== undefined) destination = result.destination;
               }
@@ -339,6 +393,32 @@ export function toolFormPanel(
         draftError = null;
       }
 
+      if (focus === 3 && matchesKey(data, Key.up)) {
+        const previousSelection = guidelineSelection;
+        const atFirstRow = previousSelection === 0;
+        commitGuidelinesEditor();
+        if (atFirstRow) {
+          focus = 2;
+        } else {
+          selectGuideline(previousSelection - 1);
+        }
+        tui.requestRender();
+        return;
+      }
+
+      if (focus === 3 && matchesKey(data, Key.down)) {
+        const previousSelection = guidelineSelection;
+        const atAddRow = previousSelection >= guidelines.length;
+        const commitResult = commitGuidelinesEditor();
+        if (atAddRow) {
+          focus = 4;
+        } else {
+          selectGuideline(commitResult === "deleted" ? previousSelection : previousSelection + 1);
+        }
+        tui.requestRender();
+        return;
+      }
+
       if (matchesKey(data, Key.up)) {
         focus = (focus + maxFocus) % (maxFocus + 1);
         tui.requestRender();
@@ -346,6 +426,7 @@ export function toolFormPanel(
       }
 
       if (matchesKey(data, Key.down) || matchesKey(data, Key.tab)) {
+        if (focus === 3) commitGuidelinesEditor();
         focus = (focus + 1) % (maxFocus + 1);
         tui.requestRender();
         return;
@@ -357,11 +438,11 @@ export function toolFormPanel(
           focus = (focus + 1) % (maxFocus + 1);
           tui.requestRender();
         } else if (focus === 3) {
-          // Guidelines field: add guideline or advance
+          // Guidelines field: save selected guideline, add new guideline, or advance
+          const hasSelectedGuideline = selectedGuidelineIndex() !== null;
           const text = guidelinesEditor.getText().trim();
-          if (text) {
-            guidelines = [...guidelines, text];
-            guidelinesEditor.setText("");
+          if (hasSelectedGuideline || text) {
+            commitGuidelinesEditor();
             tui.requestRender();
           } else {
             focus = 4;
@@ -381,8 +462,19 @@ export function toolFormPanel(
 
       // Guidelines field
       if (focus === 3) {
+        const selected = selectedGuidelineIndex();
+        if (matchesKey(data, Key.delete) && selected !== null) {
+          deleteGuideline(selected);
+          tui.requestRender();
+          return;
+        }
         if (matchesKey(data, Key.backspace) && guidelinesEditor.getText() === "" && guidelines.length > 0) {
-          guidelines = guidelines.slice(0, -1);
+          if (selected !== null) {
+            deleteGuideline(selected);
+          } else {
+            guidelines = guidelines.slice(0, -1);
+            selectGuideline(guidelines.length);
+          }
           tui.requestRender();
           return;
         }
