@@ -143,6 +143,28 @@ describe("draftToolDefinition", () => {
     expect("rejected" in result).toBe(false);
   });
 
+  it("leaves description blank when valid JSON omits it", async () => {
+    mockStreamSimple.mockReturnValue(
+      makeStream(
+        JSON.stringify({
+          name: "run_tests",
+          command: "npm test -- {{...files?}}",
+          requires_approval: false,
+          guidelines: [],
+          destination: "session",
+        }),
+      ),
+    );
+
+    const result = await draftToolDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      { command: "npm test", reasoning: "run tests" },
+    );
+
+    expect(result).toMatchObject({ command: "npm test -- {{...files?}}", description: "" });
+  });
+
   it("accepts session as a drafted destination", async () => {
     const toolDef = {
       name: "run_tests",
@@ -172,8 +194,50 @@ describe("draftToolDefinition", () => {
     expect("rejected" in result).toBe(false);
     const output = result as DraftOutput;
     expect(output.command).toBe("npm test");
+    expect(output.description).toBe("");
     expect(output.name).toBeTruthy();
     expect(output.destination).toBe("session");
+  });
+});
+
+describe("draftToolDefinition — systemPrompt metadata rules", () => {
+  function captureSystemPrompt(): string {
+    const calls = mockStreamSimple.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    // biome-ignore lint/suspicious/noExplicitAny: accessing mock call args
+    return (lastCall[1] as any).systemPrompt as string;
+  }
+
+  it("forbids copying or paraphrasing the command in description and requires at least one guideline under applicable conditions", async () => {
+    const toolDef = {
+      name: "run_tests",
+      command: "npm test",
+      description: "Run tests",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(toolDef)));
+    await draftToolDefinition(fakeModel, { apiKey: "test" }, { command: "npm test", reasoning: "run tests" });
+    const sp = captureSystemPrompt();
+    expect(sp).toMatch(/not copy|not quote|not paraphrase/i);
+    expect(sp).toMatch(/at least one/i);
+  });
+
+  it("REVISE_PROMPT forbids copying or paraphrasing the command and requires at least one guideline under applicable conditions", async () => {
+    const current: DraftOutput = {
+      name: "run_tests",
+      command: "npm test",
+      description: "Run tests",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(current)));
+    await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+    const sp = captureSystemPrompt();
+    expect(sp).toMatch(/not copy|not quote|not paraphrase/i);
+    expect(sp).toMatch(/at least one/i);
   });
 });
 
