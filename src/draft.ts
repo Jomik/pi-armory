@@ -3,6 +3,16 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai";
 
+export interface DraftAuth {
+  apiKey?: string;
+  headers?: Record<string, string>;
+  baseUrl?: string;
+}
+
+function withBaseUrl(model: Model<Api>, auth: DraftAuth): Model<Api> {
+  return auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+}
+
 export interface DraftInput {
   command: string;
   reasoning: string;
@@ -70,7 +80,7 @@ Reply with ONLY a JSON object.`;
 
 export async function draftToolDefinition(
   model: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   input: DraftInput,
   signal?: AbortSignal,
 ): Promise<DraftOutput | DraftRejection> {
@@ -82,7 +92,7 @@ export async function draftToolDefinition(
   // Use streamSimple and collect all text
   let text = "";
   const stream = streamSimple(
-    model,
+    withBaseUrl(model, auth),
     {
       systemPrompt: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
@@ -93,6 +103,8 @@ export async function draftToolDefinition(
   for await (const event of stream) {
     if (event.type === "text_delta") {
       text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
     }
   }
 
@@ -174,7 +186,7 @@ Reply with ONLY a JSON object.`;
 
 export async function reviseDraftDefinition(
   model: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   input: ReviseInput,
   signal?: AbortSignal,
 ): Promise<DraftOutput> {
@@ -192,7 +204,7 @@ export async function reviseDraftDefinition(
 
   let text = "";
   const stream = streamSimple(
-    model,
+    withBaseUrl(model, auth),
     {
       systemPrompt: REVISE_PROMPT,
       messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
@@ -203,6 +215,8 @@ export async function reviseDraftDefinition(
   for await (const event of stream) {
     if (event.type === "text_delta") {
       text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
     }
   }
 
@@ -261,7 +275,7 @@ If no meaningful candidates can be determined, return [].`;
 
 export async function generateCandidateRequests(
   model: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   projectEvidence: string,
   signal?: AbortSignal,
 ): Promise<CandidateRequest[]> {
@@ -269,7 +283,7 @@ export async function generateCandidateRequests(
 
   let text = "";
   const stream = streamSimple(
-    model,
+    withBaseUrl(model, auth),
     {
       systemPrompt: CANDIDATES_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
@@ -280,6 +294,8 @@ export async function generateCandidateRequests(
   for await (const event of stream) {
     if (event.type === "text_delta") {
       text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
     }
   }
 

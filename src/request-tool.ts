@@ -71,21 +71,16 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       if (draftModel) {
         const auth = await ctx.modelRegistry.getApiKeyAndHeaders(draftModel);
         if (auth.ok) {
-          try {
-            const draftResult = await draftToolDefinition(
-              draftModel,
-              { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
-              { command: params.command, reasoning: params.reasoning, context: params.context },
-              signal,
-            );
-            if ("rejected" in draftResult && draftResult.rejected) {
-              draftRejectionReason = draftResult.reason;
-            } else {
-              drafted = draftResult as DraftOutput;
-            }
-          } catch (err) {
-            if (err instanceof Error && err.name === "AbortError") throw err;
-            // Draft failed — continue with raw input
+          const draftResult = await draftToolDefinition(
+            draftModel,
+            auth,
+            { command: params.command, reasoning: params.reasoning, context: params.context },
+            signal,
+          );
+          if ("rejected" in draftResult && draftResult.rejected) {
+            draftRejectionReason = draftResult.reason;
+          } else {
+            drafted = draftResult as DraftOutput;
           }
         }
       }

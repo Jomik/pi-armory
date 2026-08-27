@@ -5,7 +5,7 @@ import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-wor
 import type { TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { saveConfig } from "./config.js";
-import type { CandidateRequest, DraftInput, DraftOutput } from "./draft.js";
+import type { CandidateRequest, DraftAuth, DraftInput, DraftOutput } from "./draft.js";
 import { draftToolDefinition, generateCandidateRequests } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
@@ -254,7 +254,7 @@ async function processCandidate(
   projectRoot: string,
   draftModelName: string | undefined,
   draftModel: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   candidate: CandidateRequest,
 ): Promise<"registered" | "skipped"> {
   const draftInput: DraftInput = {
@@ -360,8 +360,6 @@ export async function handleOnboard(
     ctx.ui.notify("Cannot authenticate the draft model. Check your API key.", "error");
     return;
   }
-  const authCreds = { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) };
-
   // Gather project evidence
   ctx.ui.notify("Gathering project evidence…", "info");
   const evidence = await gatherProjectEvidence(projectRoot);
@@ -370,7 +368,7 @@ export async function handleOnboard(
   ctx.ui.notify("Generating tool candidates…", "info");
   let candidates: CandidateRequest[];
   try {
-    candidates = await generateCandidateRequests(draftModel, authCreds, evidence);
+    candidates = await generateCandidateRequests(draftModel, auth, evidence);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") throw err;
     const msg = err instanceof Error ? err.message : String(err);
@@ -397,7 +395,7 @@ export async function handleOnboard(
   let skipped = 0;
 
   for (const candidate of chosen) {
-    const outcome = await processCandidate(pi, ctx, projectRoot, draftModelName, draftModel, authCreds, candidate);
+    const outcome = await processCandidate(pi, ctx, projectRoot, draftModelName, draftModel, auth, candidate);
     if (outcome === "registered") {
       registered++;
     } else {

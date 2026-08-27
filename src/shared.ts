@@ -39,7 +39,7 @@ export function makeRedraftCallback(
     if (!auth.ok) return null;
     const revised = await reviseDraftDefinition(
       model,
-      { apiKey: auth.apiKey ?? "", ...(auth.headers ? { headers: auth.headers } : {}) },
+      auth,
       {
         current: {
           name: current.name,
