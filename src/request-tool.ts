@@ -90,23 +90,29 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         throw new Error(`Draft rejected${reason}`);
       }
 
-      const result = await showToolEditor(
-        ctx,
-        {
-          name: drafted?.name ?? "",
-          command: drafted?.command ?? params.command,
-          description: drafted?.description ?? params.reasoning,
-          guidelines: drafted?.guidelines ?? [],
-          requiresApproval: drafted?.requires_approval ?? false,
-          destination: drafted?.destination ?? "session",
-        },
-        draftModelName,
-        {
-          command: params.command,
-          reasoning: params.reasoning,
-          ...(params.context ? { context: params.context } : {}),
-        },
-      );
+      pi.events.emit("herdr:blocked", { active: true, label: "review proposed tool" });
+      let result!: Awaited<ReturnType<typeof showToolEditor>>;
+      try {
+        result = await showToolEditor(
+          ctx,
+          {
+            name: drafted?.name ?? "",
+            command: drafted?.command ?? params.command,
+            description: drafted?.description ?? params.reasoning,
+            guidelines: drafted?.guidelines ?? [],
+            requiresApproval: drafted?.requires_approval ?? false,
+            destination: drafted?.destination ?? "session",
+          },
+          draftModelName,
+          {
+            command: params.command,
+            reasoning: params.reasoning,
+            ...(params.context ? { context: params.context } : {}),
+          },
+        );
+      } finally {
+        pi.events.emit("herdr:blocked", { active: false });
+      }
 
       if ("rejected" in result) {
         const reason = result.reason ? `: ${result.reason}` : "";
