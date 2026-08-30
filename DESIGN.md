@@ -52,6 +52,28 @@ The registry is never persisted. Resolution order for edit/delete is: session > 
 - APIs are stateless per-request — tools array can change between turns, no meta-tool needed
 - Armory removes `bash` from the active tool set by default (`disableBash: true` in global config). Set `disableBash: false` in global config to keep `bash` active; project-local `disableBash` is ignored.
 
+## Project onboarding (`/armory onboard`)
+
+Onboarding is a human-initiated batch wrapper around the existing tool drafting and review flow. It helps bootstrap a project by asking the draft model what common development operations an agent should have tools for, then lets the user choose which proposed requests should become actual armory tools.
+
+The onboarding flow deliberately proposes **candidate tool requests**, not final tools. A candidate request contains a short label, a command, and reasoning/context suitable for the existing `request_tool` drafter. The user multi-selects which candidates are worth drafting. Each selected candidate is then passed through the same single-tool draft/editor/approval path used by `request_tool`, so naming, descriptions, guidelines, approval flags, destination choice, validation, saving, and registration remain centralized in the existing flow.
+
+The user participates at two points:
+
+1. **Candidate selection** — choose which proposed development operations should be drafted into tools.
+2. **Tool review** — approve or edit each drafted tool using the existing tool editor.
+
+The model prompt should stay task-oriented: identify common project operations an agent needs during ordinary development, such as tests, checks, formatting, lint fixes, builds, generated artifacts, or other repo-specific maintenance commands. The implementation may gather project evidence internally, but the user-facing experience should be about operations, not manifest files or scanning mechanics.
+
+Defaults and safety policy for candidates are advisory only; final control remains with the user during multi-select and review. On approval, selected tools are saved and registered exactly like tools created through `request_tool`. Newly approved tools are still only available to the agent on the next turn.
+
+### Non-goals
+
+- A separate batch tool-definition editor.
+- A replacement for the existing `request_tool` drafting/review pipeline.
+- A background agent that repeatedly requests tools.
+- Automatic continuation or tool-list refresh in the current assistant turn.
+
 ## Config merging
 
 - Global (`~/.pi/agent/armory.json`) and project (`.pi/armory.json`) configs are additive

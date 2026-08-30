@@ -26,8 +26,13 @@ vi.mock("../src/shared.js", () => ({
   showToolEditor: vi.fn(),
 }));
 
+vi.mock("../src/onboard.js", () => ({
+  handleOnboard: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { type ArmoryCommandDeps, registerArmoryCommand } from "../src/commands.js";
 import { loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
+import { handleOnboard } from "../src/onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
 import { buildToolFromResult, showToolEditor } from "../src/shared.js";
 
@@ -550,5 +555,52 @@ describe("command completions", () => {
     expect(values).toContain("edit run_tests");
 
     sessionRegistry.clear();
+  });
+
+  it("includes onboard in top-level completions", () => {
+    const pi = makePi();
+    const deps = makeDeps();
+    registerArmoryCommand(pi as never, deps);
+    const { getArgumentCompletions } = (pi.registerCommand as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const completions = getArgumentCompletions("");
+    const values = completions?.map((c: { value: string }) => c.value) ?? [];
+    expect(values).toContain("onboard");
+  });
+});
+
+describe("handleOnboard command routing", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("routes 'onboard' to handleOnboard with correct args", async () => {
+    const pi = makePi();
+    const deps = makeDeps({ draftModelName: "provider:model" });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("onboard", ctx as never);
+
+    expect(vi.mocked(handleOnboard)).toHaveBeenCalledWith(pi, ctx, "/project", "provider:model");
+  });
+
+  it("routes 'onboard' without a draftModelName when none configured", async () => {
+    const pi = makePi();
+    const deps = makeDeps(); // no draftModelName
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("onboard", ctx as never);
+
+    expect(vi.mocked(handleOnboard)).toHaveBeenCalledWith(pi, ctx, "/project", undefined);
+  });
+
+  it("shows error notification for unknown sub-command (not onboard)", async () => {
+    const pi = makePi();
+    const deps = makeDeps();
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("unknown_sub", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("onboard"), "error");
   });
 });

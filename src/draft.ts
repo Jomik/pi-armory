@@ -3,6 +3,16 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai";
 
+export interface DraftAuth {
+  apiKey?: string;
+  headers?: Record<string, string>;
+  baseUrl?: string;
+}
+
+function withBaseUrl(model: Model<Api>, auth: DraftAuth): Model<Api> {
+  return auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+}
+
 export interface DraftInput {
   command: string;
   reasoning: string;
@@ -70,7 +80,7 @@ Reply with ONLY a JSON object.`;
 
 export async function draftToolDefinition(
   model: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   input: DraftInput,
   signal?: AbortSignal,
 ): Promise<DraftOutput | DraftRejection> {
@@ -82,7 +92,7 @@ export async function draftToolDefinition(
   // Use streamSimple and collect all text
   let text = "";
   const stream = streamSimple(
-    model,
+    withBaseUrl(model, auth),
     {
       systemPrompt: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
@@ -93,6 +103,8 @@ export async function draftToolDefinition(
   for await (const event of stream) {
     if (event.type === "text_delta") {
       text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
     }
   }
 
@@ -174,7 +186,7 @@ Reply with ONLY a JSON object.`;
 
 export async function reviseDraftDefinition(
   model: Model<Api>,
-  auth: { apiKey: string; headers?: Record<string, string> },
+  auth: DraftAuth,
   input: ReviseInput,
   signal?: AbortSignal,
 ): Promise<DraftOutput> {
@@ -192,7 +204,7 @@ export async function reviseDraftDefinition(
 
   let text = "";
   const stream = streamSimple(
-    model,
+    withBaseUrl(model, auth),
     {
       systemPrompt: REVISE_PROMPT,
       messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
@@ -203,6 +215,8 @@ export async function reviseDraftDefinition(
   for await (const event of stream) {
     if (event.type === "text_delta") {
       text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
     }
   }
 
@@ -232,6 +246,91 @@ export async function reviseDraftDefinition(
 
   // Fallback: return the current definition unchanged
   return input.current;
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding: candidate request generation
+// ---------------------------------------------------------------------------
+
+export interface CandidateRequest {
+  label: string;
+  command: string;
+  reasoning: string;
+  context?: string;
+}
+
+const CANDIDATES_SYSTEM_PROMPT = `You are bootstrapping a coding agent's tool armory for a software project.
+Propose candidate tool requests for common development operations the agent may need during ordinary development.
+Focus on operations such as: running tests, type checking, linting, fixing lint, formatting, building/compiling, generating artifacts (schemas, types, API clients), and repo-specific maintenance commands.
+
+Based on the project evidence provided, produce a JSON array of candidate requests. Each item must have:
+- label: short display name (e.g. "Run tests", "Type check", "Lint fix", "Build")
+- command: the shell command to run (will be reviewed and refined; approximate is acceptable)
+- reasoning: why an agent needs this during ordinary development (1-2 sentences)
+- context: optional — include only if the command involves a non-obvious script or requires additional explanation
+
+Return ONLY a valid JSON array. Aim for 3–8 candidates covering distinct operations.
+Omit any candidate whose command cannot be inferred from the evidence.
+If no meaningful candidates can be determined, return [].`;
+
+export async function generateCandidateRequests(
+  model: Model<Api>,
+  auth: DraftAuth,
+  projectEvidence: string,
+  signal?: AbortSignal,
+): Promise<CandidateRequest[]> {
+  const userMessage = `Project evidence:\n${projectEvidence}`;
+
+  let text = "";
+  const stream = streamSimple(
+    withBaseUrl(model, auth),
+    {
+      systemPrompt: CANDIDATES_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
+    },
+    { apiKey: auth.apiKey, ...(auth.headers ? { headers: auth.headers } : {}), signal },
+  );
+
+  for await (const event of stream) {
+    if (event.type === "text_delta") {
+      text += event.delta;
+    } else if (event.type === "error") {
+      throw new Error(event.error.errorMessage ?? "Model stream failed");
+    }
+  }
+
+  const cleaned = text
+    .replace(/^```(?:json)?\s*\n?/m, "")
+    .replace(/\n?```\s*$/m, "")
+    .trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error(`Model returned malformed JSON for candidates: ${cleaned.slice(0, 200)}`);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Model returned a non-array response for candidates");
+  }
+
+  const candidates: CandidateRequest[] = [];
+  for (const item of parsed as unknown[]) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const obj = item as Record<string, unknown>;
+      if (typeof obj.label === "string" && typeof obj.command === "string" && typeof obj.reasoning === "string") {
+        candidates.push({
+          label: obj.label,
+          command: obj.command,
+          reasoning: obj.reasoning,
+          ...(typeof obj.context === "string" ? { context: obj.context } : {}),
+        });
+      }
+    }
+  }
+
+  return candidates;
 }
 
 export function deriveNameFromCommand(command: string): string {
