@@ -44,17 +44,22 @@ const factory: ExtensionFactory = async (pi) => {
       return { block: true, reason: `Cannot run '${tool.name}': ${msg}` };
     }
 
-    const approved = await ctx.ui.custom<boolean>(
-      (tui, theme, _kb, done) =>
-        createApprovalPanel(tui, theme, done, {
-          toolName: tool.name,
-          command: tool.command,
-          params: event.input as Record<string, unknown>,
-        }),
-      { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
-    );
-    if (!approved) {
-      return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+    pi.events.emit("herdr:blocked", { active: true, label: `approve tool: ${tool.name}` });
+    try {
+      const approved = await ctx.ui.custom<boolean>(
+        (tui, theme, _kb, done) =>
+          createApprovalPanel(tui, theme, done, {
+            toolName: tool.name,
+            command: tool.command,
+            params: event.input as Record<string, unknown>,
+          }),
+        { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
+      );
+      if (!approved) {
+        return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+      }
+    } finally {
+      pi.events.emit("herdr:blocked", { active: false });
     }
   });
 

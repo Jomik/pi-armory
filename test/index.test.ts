@@ -34,6 +34,7 @@ const fakePi = {
   setActiveTools: vi.fn(),
   on: vi.fn(),
   registerTool: vi.fn(),
+  events: { emit: vi.fn() },
 } as unknown as Parameters<typeof factory>[0];
 
 describe("factory", () => {
@@ -141,6 +142,49 @@ describe("factory", () => {
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
+    });
+
+    it("emits herdr:blocked active before approval UI and inactive after approve", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      const customMock = vi.fn().mockResolvedValue(true);
+      const ctx = { ui: { custom: customMock } };
+      await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
+      const emitMock = fakePi.events.emit as any;
+      expect(emitMock).toHaveBeenNthCalledWith(1, "herdr:blocked", { active: true, label: "approve tool: dangerous" });
+      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
+    });
+
+    it("emits herdr:blocked inactive in finally even when user rejects", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      const customMock = vi.fn().mockResolvedValue(false);
+      const ctx = { ui: { custom: customMock } };
+      await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
+      const emitMock = fakePi.events.emit as any;
+      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
+    });
+
+    it("emits herdr:blocked inactive in finally when approval UI throws", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      const customMock = vi.fn().mockRejectedValue(new Error("UI closed"));
+      const ctx = { ui: { custom: customMock } };
+      await expect(handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx)).rejects.toThrow("UI closed");
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
+      const emitMock = fakePi.events.emit as any;
+      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
     });
 
     it("includes runtime-registered tools in approval checks", async () => {
