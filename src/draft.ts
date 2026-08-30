@@ -46,9 +46,9 @@ If you do NOT have enough information to produce a good definition — for examp
 Otherwise, produce a tool definition with these fields:
 - name: snake_case verb phrase for the action (e.g. "run_tests", "deploy_staging"), not the binary name.
 - command: the shell command. Replace values that vary between invocations with {{param_name}} placeholders. Never quote placeholders — they are auto shell-escaped. Never prefix with \`cd\` — the caller controls cwd. Prefer long flags when the short form is ambiguous or obscure.
-- description: one sentence explaining what the tool does.
+- description: required. A one-sentence summary of the tool's outcome or purpose. Must not copy, quote, or paraphrase the shell command, and must not merely name the executable.
 - requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
-- guidelines: ultra-short hints (≤8 words each). Only if genuinely non-obvious; prefer [].
+- guidelines: ultra-short actionable hints (≤8 words each). Include at least one whenever the tool has parameters, prerequisites, side effects, safety concerns, sequencing requirements, or non-obvious constraints. Use [] only when none of those apply and the tool is genuinely self-explanatory.
 - destination: "session" for one-off tools only needed in the current conversation, "project" for repo-specific scripts/conventions, "global" for general-purpose tools usable in any project.
 
 Placeholder syntax:
@@ -127,7 +127,7 @@ export async function draftToolDefinition(
       return {
         name: typeof obj.name === "string" ? obj.name : deriveNameFromCommand(input.command),
         command: typeof obj.command === "string" ? obj.command : input.command,
-        description: typeof obj.description === "string" ? obj.description : input.command,
+        description: typeof obj.description === "string" ? obj.description : "",
         requires_approval: typeof obj.requires_approval === "boolean" ? obj.requires_approval : false,
         guidelines: Array.isArray(obj.guidelines)
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
@@ -143,7 +143,7 @@ export async function draftToolDefinition(
   return {
     name: deriveNameFromCommand(input.command),
     command: input.command,
-    description: input.command,
+    description: "",
     requires_approval: false,
     guidelines: [],
     destination: "session",
@@ -181,6 +181,12 @@ Parameterization:
 - Do extract: identifiers, messages, branch/tag names, env names, numeric arguments (counts, limits, line numbers, ports, timeouts).
 - Do NOT extract: the binary/app name, URL schemes (http/https), fixed flags that define the tool's purpose, or structural constants.
 - Use disambiguating names when multiple similar params exist ({{target_branch}} vs {{source_branch}}).
+
+Description:
+A one-sentence summary of the tool's outcome or purpose. Must not copy, quote, or paraphrase the shell command, and must not merely name the executable. Rewrite weak existing descriptions.
+
+Guidelines:
+Ultra-short actionable hints (≤8 words each). Include at least one whenever the tool has parameters, prerequisites, side effects, safety concerns, sequencing requirements, or non-obvious constraints. Use [] only when none of those apply and the tool is genuinely self-explanatory. Do not preserve an existing [] merely because it is currently empty.
 
 Reply with ONLY a JSON object.`;
 
