@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/Jomik/pi-armory/compare/v0.4.0...v0.5.0) (2026-08-30)
+
+
+### Features
+
+* add project tool onboarding ([#23](https://github.com/Jomik/pi-armory/issues/23)) ([9f6e4ca](https://github.com/Jomik/pi-armory/commit/9f6e4ca0a5add1564d066f806f6b78751d901a5d))
+* add session-only tool scopes ([#21](https://github.com/Jomik/pi-armory/issues/21)) ([43f8369](https://github.com/Jomik/pi-armory/commit/43f8369411ca2fe4d5fd732ad1334a27f10ed423))
+* improve armory management UI ([#25](https://github.com/Jomik/pi-armory/issues/25)) ([3d31f2b](https://github.com/Jomik/pi-armory/commit/3d31f2b3cde67846eed0b75faea1ca56eb85d306))
+
+
+### Bug Fixes
+
+* improve generated tool metadata ([#24](https://github.com/Jomik/pi-armory/issues/24)) ([ced7fd1](https://github.com/Jomik/pi-armory/commit/ced7fd1459c9a036f122bff37ed4d07e0de6074d))
+
 ## [0.4.0](https://github.com/Jomik/pi-armory/compare/v0.3.0...v0.4.0) (2026-06-01)
 
 
