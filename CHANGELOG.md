@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/Jomik/pi-armory/compare/v0.5.0...v0.6.0) (2026-08-30)
+
+
+### Features
+
+* report tool approval waits to herdr ([#26](https://github.com/Jomik/pi-armory/issues/26)) ([5580f90](https://github.com/Jomik/pi-armory/commit/5580f907d9a4d37cd4aa9113ee55c4029632ade5))
+
 ## [0.5.0](https://github.com/Jomik/pi-armory/compare/v0.4.0...v0.5.0) (2026-08-30)
 
 
