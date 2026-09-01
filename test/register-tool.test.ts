@@ -77,6 +77,16 @@ describe("registerArmoryTool", () => {
     expect(def.description).toBe("A test tool");
   });
 
+  it("tells agents to call approval tools directly", () => {
+    const registerTool = vi.fn();
+    registerArmoryTool({ registerTool } as unknown as ExtensionAPI, { ...approvalTool, guidelines: ["Use caution"] });
+
+    expect(registerTool.mock.calls[0][0].promptGuidelines).toEqual([
+      "This tool prompts the user for approval when called. Call it directly; do not ask for approval first.",
+      "Use caution",
+    ]);
+  });
+
   it("executes command and returns output on success", async () => {
     mockExecuteCommand.mockResolvedValue("hello\n");
     const execute = registerAndCapture(baseTool);
