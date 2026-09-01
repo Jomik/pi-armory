@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/Jomik/pi-armory/compare/v0.6.0...v0.6.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* tell agents approval tools prompt users ([#28](https://github.com/Jomik/pi-armory/issues/28)) ([b461bf7](https://github.com/Jomik/pi-armory/commit/b461bf771c20df27aa0033d6e8756c8e45d87cce))
+
 ## [0.6.0](https://github.com/Jomik/pi-armory/compare/v0.5.0...v0.6.0) (2026-08-30)
 
 
