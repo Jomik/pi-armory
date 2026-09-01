@@ -201,7 +201,11 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
     label: tool.name,
     description: tool.description,
     promptSnippet: `Runs the command \`${tool.command}\``,
-    promptGuidelines: tool.guidelines,
+    promptGuidelines: tool.requires_approval
+      ? [
+          "This tool prompts the user for approval when called. Call it directly; do not ask for approval first.",
+        ].concat(tool.guidelines ?? [])
+      : tool.guidelines,
     parameters: schema,
     renderCall(args, theme, context) {
       const title = theme.fg("toolTitle", theme.bold(tool.name));
