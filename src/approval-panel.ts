@@ -3,16 +3,19 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { formatParamValue } from "./shared.js";
 
+export type ApprovalAction = "run" | "edit" | "reject";
+
 export interface ApprovalPanelOptions {
   toolName: string;
   command: string;
   params: Record<string, unknown>;
+  allowEdit?: boolean;
 }
 
 export function createApprovalPanel(
   tui: TUI,
   theme: Theme,
-  done: (approved: boolean) => void,
+  done: (action: ApprovalAction) => void,
   options: ApprovalPanelOptions,
 ): { render(width: number): string[]; handleInput(data: string): void; invalidate(): void } {
   let scrollOffset = 0;
@@ -52,7 +55,10 @@ export function createApprovalPanel(
       lines.push("");
     }
 
-    lines.push(` ${theme.fg("dim", "Enter approve  •  Esc reject  •  ↑↓ scroll")}`);
+    const hint = options.allowEdit
+      ? "Enter run  •  e edit  •  Esc reject  •  ↑↓ scroll"
+      : "Enter run  •  Esc reject  •  ↑↓ scroll";
+    lines.push(` ${theme.fg("dim", hint)}`);
 
     return lines;
   }
@@ -93,9 +99,11 @@ export function createApprovalPanel(
 
     handleInput(data: string): void {
       if (matchesKey(data, Key.enter)) {
-        done(true);
+        done("run");
+      } else if (options.allowEdit && data === "e") {
+        done("edit");
       } else if (matchesKey(data, Key.escape)) {
-        done(false);
+        done("reject");
       } else if (matchesKey(data, Key.down) || matchesKey(data, Key.ctrl("n"))) {
         if (scrollOffset < maxScroll) {
           scrollOffset++;

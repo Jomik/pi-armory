@@ -1,8 +1,15 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { createApprovalPanel } from "./approval-panel.js";
+import { type ApprovalAction, createApprovalPanel } from "./approval-panel.js";
 import { registerArmoryCommand } from "./commands.js";
 import { loadConfig } from "./config.js";
-import { approvalRegistry, interpolateCommand, registerArmoryTool } from "./register-tool.js";
+import { parsePlaceholders } from "./placeholders.js";
+import {
+  approvalRegistry,
+  buildParamSchema,
+  interpolateCommand,
+  registerArmoryTool,
+  validateToolParams,
+} from "./register-tool.js";
 import { registerRequestTool } from "./request-tool.js";
 
 const factory: ExtensionFactory = async (pi) => {
@@ -37,8 +44,10 @@ const factory: ExtensionFactory = async (pi) => {
     const tool = approvalRegistry.get(event.toolName);
     if (!tool) return;
 
+    let input = event.input as Record<string, unknown>;
+
     try {
-      interpolateCommand(tool.command, event.input as Record<string, unknown>);
+      interpolateCommand(tool.command, input);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "interpolation failed";
       return { block: true, reason: `Cannot run '${tool.name}': ${msg}` };
@@ -46,17 +55,55 @@ const factory: ExtensionFactory = async (pi) => {
 
     pi.events.emit("herdr:blocked", { active: true, label: `approve tool: ${tool.name}` });
     try {
-      const approved = await ctx.ui.custom<boolean>(
-        (tui, theme, _kb, done) =>
+      if (!ctx.hasUI) {
+        return { block: true, reason: `Cannot run '${tool.name}': approval required but no UI is available.` };
+      }
+
+      const schema = buildParamSchema(tool);
+      const allowEdit = parsePlaceholders(tool.command).length > 0;
+
+      for (;;) {
+        const command = interpolateCommand(tool.command, input);
+        const action = await ctx.ui.custom<ApprovalAction>((tui, theme, _kb, done) =>
           createApprovalPanel(tui, theme, done, {
             toolName: tool.name,
-            command: tool.command,
-            params: event.input as Record<string, unknown>,
+            command,
+            params: input,
+            allowEdit,
           }),
-        { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
-      );
-      if (!approved) {
-        return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+        );
+
+        if (action === "run") {
+          (event as { input: Record<string, unknown> }).input = input;
+          return;
+        }
+        if (action === "reject") {
+          return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+        }
+
+        // action === "edit": loop on the editor until valid input, cancel, or dismissal.
+        for (;;) {
+          const edited = await ctx.ui.editor(`Edit parameters: ${tool.name}`, JSON.stringify(input, null, 2));
+          if (edited === undefined) break; // cancel -> back to review, unchanged
+
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(edited);
+          } catch {
+            ctx.ui.notify("Invalid JSON. Fix and retry, or cancel to keep current values.", "error");
+            continue;
+          }
+
+          const validated = validateToolParams(schema, parsed);
+          if (!validated.ok) {
+            ctx.ui.notify(`Invalid parameters: ${validated.message}`, "error");
+            continue;
+          }
+
+          input = validated.value;
+          (event as { input: Record<string, unknown> }).input = input;
+          break; // valid edit -> back to review
+        }
       }
     } finally {
       pi.events.emit("herdr:blocked", { active: false });

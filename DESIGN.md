@@ -239,9 +239,15 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 ## `requires_approval` execution flow
 
 1. Agent calls a tool that has `requires_approval: true`
-2. A minimal confirm/reject TUI is shown displaying the command template and provided parameter values
-3. Human approves → command executes, output returned to agent
-4. Human rejects → agent gets a rejection message, command does not run
+2. If no UI is available (`ctx.hasUI` is false), the call is blocked immediately with a rejection message; the `herdr:blocked` active/inactive lifecycle still fires around the check
+3. Otherwise, an approval panel is shown displaying the fully interpolated command for the current parameters. Edit is offered only when the command has parameters
+4. The review loop repeats until the human explicitly runs or rejects:
+   - **Run** → command executes with the current parameters, output returned to agent
+   - **Reject** → agent gets a rejection message, command does not run
+   - **Edit** → `ctx.ui.editor` opens with the current parameters as pretty-printed JSON
+     - Cancel returns to the panel unchanged
+     - Invalid JSON or parameters failing the tool's TypeBox schema are reported via notification, and the human can retry the editor or cancel
+     - A valid edit replaces the tool call's input and returns to the panel for another review pass; the edited command must be reviewed again before it can run
 
 ## Output handling
 
