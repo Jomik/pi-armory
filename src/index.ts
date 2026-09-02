@@ -46,6 +46,13 @@ const factory: ExtensionFactory = async (pi) => {
 
     let input = event.input as Record<string, unknown>;
 
+    const schema = buildParamSchema(tool);
+    const validatedInitial = validateToolParams(schema, input);
+    if (!validatedInitial.ok) {
+      return { block: true, reason: `Cannot run '${tool.name}': Invalid parameters: ${validatedInitial.message}` };
+    }
+    input = validatedInitial.value;
+
     try {
       interpolateCommand(tool.command, input);
     } catch (err) {
@@ -59,7 +66,6 @@ const factory: ExtensionFactory = async (pi) => {
         return { block: true, reason: `Cannot run '${tool.name}': approval required but no UI is available.` };
       }
 
-      const schema = buildParamSchema(tool);
       const allowEdit = parsePlaceholders(tool.command).length > 0;
 
       for (;;) {

@@ -231,6 +231,22 @@ describe("factory", () => {
       expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
     });
 
+    it("blocks and does not open approval UI when initial input fails schema validation", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      const customMock = vi.fn();
+      const ctx = { hasUI: true, ui: { custom: customMock } };
+      const result = await handler?.({ toolName: "dangerous", input: {} }, ctx);
+
+      expect(customMock).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        block: true,
+        reason: expect.stringContaining("Invalid parameters"),
+      });
+    });
+
     it("emits herdr:blocked active before approval UI and inactive after run", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
       await factory(fakePi);
