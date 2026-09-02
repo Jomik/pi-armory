@@ -1,5 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { type ApprovalAction, createApprovalPanel } from "../src/approval-panel.js";
 
@@ -63,10 +64,13 @@ describe("createApprovalPanel", () => {
     expect(renderedWithout).not.toContain("e edit");
   });
 
-  it("does not throw when rendered below the border/inner-width assumptions", () => {
+  it("bounds every rendered line to the requested width, even for very narrow widths", () => {
     const { panel } = makePanel(true);
     for (const width of [0, 1, 2, 3, 4, 5, 10]) {
-      expect(() => panel.render(width)).not.toThrow();
+      const lines = panel.render(width);
+      for (const line of lines) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(Math.max(width, 0));
+      }
     }
   });
 });

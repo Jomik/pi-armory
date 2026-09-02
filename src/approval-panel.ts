@@ -95,7 +95,8 @@ export function createApprovalPanel(
       // Bottom border
       lines.push(theme.fg("accent", `╰${"─".repeat(borderWidth)}╯`));
 
-      return lines;
+      const maxWidth = Math.max(width, 0);
+      return lines.map((line) => truncateToWidth(line, maxWidth));
     },
 
     handleInput(data: string): void {
