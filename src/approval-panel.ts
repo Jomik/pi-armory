@@ -67,7 +67,8 @@ export function createApprovalPanel(
     invalidate() {},
 
     render(width: number): string[] {
-      const innerWidth = width - 4; // │ + space on each side
+      const innerWidth = Math.max(width - 4, 1); // │ + space on each side
+      const borderWidth = Math.max(width - 2, 0);
       const content = buildContent(innerWidth);
       const visibleCount = Math.min(content.length, VIEWPORT_LINES);
       maxScroll = Math.max(0, content.length - visibleCount);
@@ -81,7 +82,7 @@ export function createApprovalPanel(
       const lines: string[] = [];
 
       // Top border
-      lines.push(theme.fg("accent", `╭${"─".repeat(width - 2)}╮`));
+      lines.push(theme.fg("accent", `╭${"─".repeat(borderWidth)}╮`));
 
       // Content lines with side borders (fixed viewport size)
       for (let i = 0; i < visibleCount; i++) {
@@ -92,7 +93,7 @@ export function createApprovalPanel(
       }
 
       // Bottom border
-      lines.push(theme.fg("accent", `╰${"─".repeat(width - 2)}╯`));
+      lines.push(theme.fg("accent", `╰${"─".repeat(borderWidth)}╯`));
 
       return lines;
     },

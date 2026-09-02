@@ -62,4 +62,11 @@ describe("createApprovalPanel", () => {
     expect(renderedWith).toContain("e edit");
     expect(renderedWithout).not.toContain("e edit");
   });
+
+  it("does not throw when rendered below the border/inner-width assumptions", () => {
+    const { panel } = makePanel(true);
+    for (const width of [0, 1, 2, 3, 4, 5, 10]) {
+      expect(() => panel.render(width)).not.toThrow();
+    }
+  });
 });

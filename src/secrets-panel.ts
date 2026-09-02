@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { addSecret, listSecrets, removeSecret } from "./keychain.js";
 
 type Mode = "list" | "confirm-delete" | "input-value";
@@ -51,7 +51,7 @@ export class SecretsPanel implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    const w = Math.max(width - 2, 20);
+    const w = Math.max(width - 2, 0);
     const { theme } = this;
     const border = theme.fg("muted", "│");
     const lines: string[] = [];
@@ -81,7 +81,7 @@ export class SecretsPanel implements Component {
     lines.push(`${border}${this.pad(` ${this.renderHints()}`, w)}${border}`);
     lines.push(theme.fg("muted", `╰${"─".repeat(w)}╯`));
 
-    return lines;
+    return lines.map((line) => truncateToWidth(line, width, ""));
   }
 
   private renderList(lines: string[], w: number, border: string): void {
@@ -256,13 +256,9 @@ export class SecretsPanel implements Component {
     }
   }
 
-  private visibleLength(text: string): number {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence matching
-    return text.replace(/\u001b\[[0-9;]*m/g, "").length;
-  }
-
   private pad(text: string, width: number): string {
-    const visible = this.visibleLength(text);
-    return text + " ".repeat(Math.max(0, width - visible));
+    const truncated = truncateToWidth(text, width, "");
+    const visible = visibleWidth(truncated);
+    return truncated + " ".repeat(Math.max(0, width - visible));
   }
 }
