@@ -1,3 +1,5 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 
@@ -136,6 +138,38 @@ describe("factory", () => {
 
       expect(customMock).toHaveBeenCalledOnce();
       expect(result).toBeUndefined();
+    });
+
+    it("passes the command template (not interpolated) to the approval panel, so a distinctive parameter is not duplicated", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      expect(handler).toBeDefined();
+
+      const distinctivePath = "/very/distinctive/unlikely-value-marker";
+      const customMock = vi.fn().mockResolvedValue("run");
+      const ctx = { hasUI: true, ui: { custom: customMock } };
+      const event = { toolName: "dangerous", input: { path: distinctivePath } };
+      await handler?.(event, ctx);
+
+      expect(customMock).toHaveBeenCalledOnce();
+      const panelFactory = customMock.mock.calls[0][0] as (
+        tui: TUI,
+        theme: Theme,
+        kb: unknown,
+        done: (action: string) => void,
+        // biome-ignore lint/suspicious/noExplicitAny: test helper matching ctx.ui.custom's factory signature
+      ) => any;
+      const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
+      const tui = { requestRender: vi.fn() } as unknown as TUI;
+      const panel = panelFactory(tui, plainTheme, undefined, vi.fn());
+      const rendered = panel.render(120).join("\n");
+
+      expect(rendered).toContain("rm -rf {{path}}");
+      expect(rendered).toContain(distinctivePath);
+      const occurrences = rendered.split(distinctivePath).length - 1;
+      expect(occurrences).toBe(1);
     });
 
     it("blocks execution when user rejects", async () => {

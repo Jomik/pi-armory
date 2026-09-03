@@ -240,7 +240,7 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 
 1. Agent calls a tool that has `requires_approval: true`
 2. If no UI is available (`ctx.hasUI` is false), the call is blocked immediately with a rejection message; the `herdr:blocked` active/inactive lifecycle still fires around the check
-3. Otherwise, an approval panel is shown displaying the fully interpolated command for the current parameters. Edit is offered only when the command has parameters
+3. Otherwise, an approval panel is shown displaying the command template (not fully interpolated) alongside the structured parameters for the current values. Edit is offered only when the command has parameters
 4. The review loop repeats until the human explicitly runs or rejects:
    - **Run** → command executes with the current parameters, output returned to agent
    - **Reject** → agent gets a rejection message, command does not run

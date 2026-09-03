@@ -69,11 +69,10 @@ const factory: ExtensionFactory = async (pi) => {
       const allowEdit = parsePlaceholders(tool.command).length > 0;
 
       for (;;) {
-        const command = interpolateCommand(tool.command, input);
         const action = await ctx.ui.custom<ApprovalAction>((tui, theme, _kb, done) =>
           createApprovalPanel(tui, theme, done, {
             toolName: tool.name,
-            command,
+            command: tool.command,
             params: input,
             allowEdit,
           }),

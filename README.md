@@ -106,7 +106,7 @@ Tools with `requires_approval: true` prompt the human for confirmation before ea
 
 The review prompt is inline (non-floating) and scrolls to accommodate long commands or parameters. Actions:
 
-- **Run** - execute as shown
+- **Run** - execute the command with the displayed parameters
 - **Edit** - shown only when the tool has parameters; opens the tool call's parameter JSON in pi's standard editor for direct editing
 - **Reject** - decline; execution does not proceed
 
