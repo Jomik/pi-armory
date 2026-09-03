@@ -104,6 +104,14 @@ Tool names are automatically normalized to lowercase with underscores (e.g., "Ru
 
 Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
 
+The review prompt is inline (non-floating) and scrolls to accommodate long commands or parameters. Actions:
+
+- **Run** - execute the command with the displayed parameters
+- **Edit** - shown only when the tool has parameters; opens the tool call's parameter JSON in pi's standard editor for direct editing
+- **Reject** - decline; execution does not proceed
+
+Edits are schema-validated; once valid, the view returns to the readable review before you can Run. Press **Ctrl+G** while editing to open the same content in pi's configured external editor, with pi's normal editor-selection fallbacks. Calls made without a UI (e.g., headless/non-interactive runs) are blocked outright. See [DESIGN.md](DESIGN.md) for implementation details.
+
 ### Environment variables
 
 Tools can inject environment variables into their subprocess via the `env` field:

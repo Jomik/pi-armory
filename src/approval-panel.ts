@@ -3,16 +3,19 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { formatParamValue } from "./shared.js";
 
+export type ApprovalAction = "run" | "edit" | "reject";
+
 export interface ApprovalPanelOptions {
   toolName: string;
   command: string;
   params: Record<string, unknown>;
+  allowEdit?: boolean;
 }
 
 export function createApprovalPanel(
   tui: TUI,
   theme: Theme,
-  done: (approved: boolean) => void,
+  done: (action: ApprovalAction) => void,
   options: ApprovalPanelOptions,
 ): { render(width: number): string[]; handleInput(data: string): void; invalidate(): void } {
   let scrollOffset = 0;
@@ -52,7 +55,10 @@ export function createApprovalPanel(
       lines.push("");
     }
 
-    lines.push(` ${theme.fg("dim", "Enter approve  •  Esc reject  •  ↑↓ scroll")}`);
+    const hint = options.allowEdit
+      ? "Enter run  •  e edit  •  Esc reject  •  ↑↓ scroll"
+      : "Enter run  •  Esc reject  •  ↑↓ scroll";
+    lines.push(` ${theme.fg("dim", hint)}`);
 
     return lines;
   }
@@ -61,7 +67,8 @@ export function createApprovalPanel(
     invalidate() {},
 
     render(width: number): string[] {
-      const innerWidth = width - 4; // │ + space on each side
+      const innerWidth = Math.max(width - 4, 1); // │ + space on each side
+      const borderWidth = Math.max(width - 2, 0);
       const content = buildContent(innerWidth);
       const visibleCount = Math.min(content.length, VIEWPORT_LINES);
       maxScroll = Math.max(0, content.length - visibleCount);
@@ -75,7 +82,7 @@ export function createApprovalPanel(
       const lines: string[] = [];
 
       // Top border
-      lines.push(theme.fg("accent", `╭${"─".repeat(width - 2)}╮`));
+      lines.push(theme.fg("accent", `╭${"─".repeat(borderWidth)}╮`));
 
       // Content lines with side borders (fixed viewport size)
       for (let i = 0; i < visibleCount; i++) {
@@ -86,16 +93,19 @@ export function createApprovalPanel(
       }
 
       // Bottom border
-      lines.push(theme.fg("accent", `╰${"─".repeat(width - 2)}╯`));
+      lines.push(theme.fg("accent", `╰${"─".repeat(borderWidth)}╯`));
 
-      return lines;
+      const maxWidth = Math.max(width, 0);
+      return lines.map((line) => truncateToWidth(line, maxWidth));
     },
 
     handleInput(data: string): void {
       if (matchesKey(data, Key.enter)) {
-        done(true);
+        done("run");
+      } else if (options.allowEdit && data === "e") {
+        done("edit");
       } else if (matchesKey(data, Key.escape)) {
-        done(false);
+        done("reject");
       } else if (matchesKey(data, Key.down) || matchesKey(data, Key.ctrl("n"))) {
         if (scrollOffset < maxScroll) {
           scrollOffset++;
