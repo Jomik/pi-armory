@@ -371,7 +371,12 @@ describe("handleOnboard — per-candidate flow", () => {
     expect(registerArmoryTool).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 registered, 1 skipped"), "info");
     // First drafted candidate must be sampleCandidate (original order), not the last-toggled one.
-    expect(mockDraft).toHaveBeenNthCalledWith(1, fakeResolvedModel, expect.anything(), expect.objectContaining({ command: "npm test" }));
+    expect(mockDraft).toHaveBeenNthCalledWith(
+      1,
+      fakeResolvedModel,
+      expect.anything(),
+      expect.objectContaining({ command: "npm test" }),
+    );
     expect(mockDraft).toHaveBeenNthCalledWith(
       2,
       fakeResolvedModel,

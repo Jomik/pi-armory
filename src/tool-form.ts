@@ -139,6 +139,8 @@ export async function toolFormPanel(
           if (revised.guidelines !== undefined) guidelines = revised.guidelines;
           if (revised.requiresApproval !== undefined) requiresApproval = revised.requiresApproval;
           if (revised.destination !== undefined) destination = revised.destination;
+        } else {
+          ui.notify("Re-draft unavailable", "error");
         }
       } catch {
         ui.notify("Re-draft failed", "error");

@@ -400,6 +400,84 @@ describe("handleEdit", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });
 
+  it("aborts without changes when the edited name is invalid/empty", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "   ",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("session_tool")).toEqual(toolSession);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("valid tool name"), "error");
+  });
+
+  it("aborts without changes when the edited name is reserved", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "request_tool",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("session_tool")).toEqual(toolSession);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reserved name"), "error");
+  });
+
+  it("normalizes a valid human name before building/saving/registering", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    const updatedTool = { name: "my_new_tool", command: "echo updated", description: "updated" };
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "My New Tool!",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue(updatedTool);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(buildToolFromResult).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "my_new_tool" }),
+      expect.anything(),
+    );
+    expect(sessionRegistry.get("my_new_tool")).toEqual(updatedTool);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, updatedTool);
+  });
+
   it("uses ui.select when editing without a tool name", async () => {
     vi.mocked(loadToolsWithSource).mockResolvedValue([{ tool: toolProject, source: "project" }]);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });

@@ -4,6 +4,7 @@ import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig }
 import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "./keychain.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
+import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
 import { buildToolFromResult, showToolEditor } from "./shared.js";
 
 export interface ArmoryCommandDeps {
@@ -299,6 +300,23 @@ async function handleEdit(
 
   if ("rejected" in result) return; // user rejected
 
+  // Normalize and validate the edited name exactly like request_tool/onboarding, before any
+  // persistence or registry mutation.
+  const name = normalizeName(result.name);
+
+  if (!name || !VALID_NAME.test(name)) {
+    ctx.ui.notify(
+      `Could not derive a valid tool name from '${result.name}'. Must contain at least one letter.`,
+      "error",
+    );
+    return;
+  }
+
+  if (RESERVED_NAMES.has(name)) {
+    ctx.ui.notify(`Cannot register tool with reserved name '${name}'.`, "error");
+    return;
+  }
+
   // Confirm if scope/destination is being changed
   if (result.destination !== source) {
     const msg = scopeChangeMessage(tool.name, source, result.destination);
@@ -306,7 +324,7 @@ async function handleEdit(
     if (choice !== "Confirm") return; // user aborted — no changes applied
   }
 
-  const updatedTool = buildToolFromResult(result, { env: tool.env, secrets: tool.secrets });
+  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, secrets: tool.secrets });
   const sourceName = tool.name;
   const destName = updatedTool.name;
 

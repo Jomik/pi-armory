@@ -158,6 +158,19 @@ describe("toolFormPanel re-draft", () => {
     expect((result as ToolFormResult).name).toBe("run_tests");
   });
 
+  it("notifies and returns to review when re-draft returns null", async () => {
+    const select = queue("Re-draft", "Save");
+    const input = queue("make it faster");
+    const notify = vi.fn();
+    const ui = makeUi({ select, input, notify });
+    const onRedraft = vi.fn().mockResolvedValue(null);
+
+    const result = await toolFormPanel(ui, baseState, { onRedraft });
+
+    expect(notify).toHaveBeenCalledWith("Re-draft unavailable", "error");
+    expect((result as ToolFormResult).name).toBe("run_tests");
+  });
+
   it("does not offer re-draft when no callback is provided", async () => {
     const select = queue("Save");
     const ui = makeUi({ select });
