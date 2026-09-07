@@ -22,19 +22,20 @@ The registry is never persisted. Resolution order for edit/delete is: session > 
 
 ## Extension interoperability
 
-Armory exposes the current configuration scope of its registered tools to other Pi extensions through the versioned `pi-armory:tool-scopes:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with a plain object mapping each effective, normalized Armory tool name to `session`, `project`, or `global`; an Armory instance with no tools responds with an empty object.
+Armory exposes project-configured tool names to other Pi extensions through the versioned `pi-armory:project-tools:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with an array of normalized tool names declared in the current project's Armory configuration; a project with no configured tools receives an empty array.
 
-Armory builds a fresh snapshot from its current scope registry for every request. The snapshot follows normal Armory precedence: session overrides project, and project overrides global. Creating, moving, renaming, or deleting a tool must update that registry before the operation completes, so the next query observes the change.
+The result describes persisted project configuration, not the parent session's effective tool registry. A project tool remains in the result when a session-only tool shadows the same name because a new session will load the persisted project definition. Creating, moving, renaming, or deleting a project tool must be reflected in the next query.
 
 A consumer treats only the first callback invocation as authoritative and checks whether it was invoked before event emission returns. No synchronous response means Armory is unavailable or incompatible, and the consumer falls back to its normal behavior. Armory registers one listener per loaded extension instance; Pi removes the old subscription when reloading extensions.
 
-This is specifically **Armory configuration scope**, distinct from Pi's extension-level `sourceInfo.scope`. It only describes where Armory obtained the tool definition. It does not grant the tool, change Pi's active tools, or replace Pi's source metadata. Consumers remain responsible for authorization and user-facing grant flows. The listener's snapshot construction must not throw; Pi contains and logs exceptions raised by consumer callbacks.
+The query only describes project-configured tool names. It does not grant tools, change Pi's active tools, or replace Pi's extension-level source metadata. Consumers remain responsible for authorization and user-facing grant flows. The listener must not throw; Pi contains and logs exceptions raised by consumer callbacks.
 
 ### Non-goals
 
 - A generic per-tool metadata API in Pi core.
-- Push notifications or subscriptions for scope changes.
-- Exposing command definitions, secrets, or other Armory configuration through the scope query.
+- Exposing global or session-only Armory tools.
+- Push notifications or subscriptions for project-tool changes.
+- Exposing command definitions, secrets, or other Armory configuration through the query.
 - Automatically granting project tools to other sessions or agents.
 
 ## Core Design
