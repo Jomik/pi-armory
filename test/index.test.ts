@@ -310,6 +310,24 @@ describe("factory", () => {
       expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
     });
 
+    it("in RPC mode with UI available, requests approval via ui.select (not ui.custom) and allows execution on Run", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
+      await factory(fakePi);
+
+      const handler = getToolCallHandler();
+      expect(handler).toBeDefined();
+      const customMock = vi.fn();
+      const selectMock = vi.fn().mockResolvedValue("Run");
+      const ctx = { mode: "rpc", hasUI: true, ui: { custom: customMock, select: selectMock } };
+      const event = { toolName: "dangerous", input: { path: "/tmp" } };
+      const result = await handler?.(event, ctx);
+
+      expect(selectMock).toHaveBeenCalledOnce();
+      expect(selectMock.mock.calls[0][1]).toEqual(["Run", "Edit", "Reject"]);
+      expect(customMock).not.toHaveBeenCalled();
+      expect(result).toBeUndefined();
+    });
+
     it("includes runtime-registered tools in approval checks", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: false });
       await factory(fakePi);
