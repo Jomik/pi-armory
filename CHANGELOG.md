@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/Jomik/pi-armory/compare/v0.6.1...v0.7.0) (2026-09-07)
+
+
+### Features
+
+* expose project armory tools ([#33](https://github.com/Jomik/pi-armory/issues/33)) ([fd0ffd0](https://github.com/Jomik/pi-armory/commit/fd0ffd0e57cbf910e33b2db6a82fdd40b59150f9))
+* render approval and management UI inline ([#30](https://github.com/Jomik/pi-armory/issues/30)) ([5891a84](https://github.com/Jomik/pi-armory/commit/5891a849ea82035b85abfdc1479f649bf09e252c))
+
 ## [0.6.1](https://github.com/Jomik/pi-armory/compare/v0.6.0...v0.6.1) (2026-09-01)
 
 
