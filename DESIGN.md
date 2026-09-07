@@ -22,9 +22,11 @@ The registry is never persisted. Resolution order for edit/delete is: session > 
 
 ## Extension interoperability
 
-Armory exposes project-configured tool names to other Pi extensions through the versioned `pi-armory:project-tools:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with an array of normalized tool names declared in the current project's Armory configuration; a project with no configured tools receives an empty array.
+Armory exposes project-configured tool names to other Pi extensions through the versioned `pi-armory:project-tools:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with an array of tool names as stored in `.pi/armory.json`, sorted alphabetically; a project with no configured tools receives an empty array.
 
-The result describes persisted project configuration, not the parent session's effective tool registry. A project tool remains in the result when a session-only tool shadows the same name because a new session will load the persisted project definition. Creating, moving, renaming, or deleting a project tool must be reflected in the next query.
+Missing, unreadable, invalid-JSON, or schema-invalid project config all yield `[]`, the same as a project with no configured tools — a consumer cannot distinguish these cases.
+
+The result describes persisted project configuration, not the parent session's effective tool registry. A project tool remains in the result when a session-only tool shadows the same name because a new session will load the persisted project definition. Creating, moving, renaming, or deleting a project tool must be reflected in the next query, which re-reads the file fresh each time.
 
 A consumer treats only the first callback invocation as authoritative and checks whether it was invoked before event emission returns. No synchronous response means Armory is unavailable or incompatible, and the consumer falls back to its normal behavior. Armory registers one listener per loaded extension instance; Pi removes the old subscription when reloading extensions.
 
