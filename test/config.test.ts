@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
-import { loadConfig, loadProjectToolNamesSync, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
+import {
+  loadConfig,
+  loadProjectToolNamesSync,
+  loadToolWithSource,
+  removeFromConfig,
+  saveConfig,
+} from "../src/config.js";
 
 let tmpDir: string;
 let fakeHome: string;
