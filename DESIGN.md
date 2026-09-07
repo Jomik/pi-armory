@@ -20,6 +20,23 @@ At startup, tools are loaded from project and global config (project overrides g
 
 The registry is never persisted. Resolution order for edit/delete is: session > project > global.
 
+## Extension interoperability
+
+Armory exposes the current configuration scope of its registered tools to other Pi extensions through the versioned `pi-armory:tool-scopes:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with a plain object mapping each effective, normalized Armory tool name to `session`, `project`, or `global`; an Armory instance with no tools responds with an empty object.
+
+Armory builds a fresh snapshot from its current scope registry for every request. The snapshot follows normal Armory precedence: session overrides project, and project overrides global. Creating, moving, renaming, or deleting a tool must update that registry before the operation completes, so the next query observes the change.
+
+A consumer treats only the first callback invocation as authoritative and checks whether it was invoked before event emission returns. No synchronous response means Armory is unavailable or incompatible, and the consumer falls back to its normal behavior. Armory registers one listener per loaded extension instance; Pi removes the old subscription when reloading extensions.
+
+This is specifically **Armory configuration scope**, distinct from Pi's extension-level `sourceInfo.scope`. It only describes where Armory obtained the tool definition. It does not grant the tool, change Pi's active tools, or replace Pi's source metadata. Consumers remain responsible for authorization and user-facing grant flows. The listener's snapshot construction must not throw; Pi contains and logs exceptions raised by consumer callbacks.
+
+### Non-goals
+
+- A generic per-tool metadata API in Pi core.
+- Push notifications or subscriptions for scope changes.
+- Exposing command definitions, secrets, or other Armory configuration through the scope query.
+- Automatically granting project tools to other sessions or agents.
+
 ## Core Design
 
 - Tools are shell commands with optional `{{param}}` template parameters
