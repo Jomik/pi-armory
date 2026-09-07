@@ -87,13 +87,6 @@ function getHandler(pi: ReturnType<typeof makePi>): (args: string, ctx: unknown)
   return call[1].handler;
 }
 
-function plainTheme() {
-  return {
-    fg: (_color: string, text: string) => text,
-    bold: (text: string) => text,
-  };
-}
-
 describe("handleEdit", () => {
   beforeEach(() => {
     sessionRegistry.clear();
@@ -399,7 +392,7 @@ describe("handleEdit", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });
 
-  it("uses the custom scrollable picker when editing without a tool name", async () => {
+  it("uses ui.select when editing without a tool name", async () => {
     vi.mocked(loadToolsWithSource).mockResolvedValue([{ tool: toolProject, source: "project" }]);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
     const updatedTool = { name: "run_tests", command: "npm test --watch", description: "Run tests" };
@@ -415,14 +408,16 @@ describe("handleEdit", () => {
 
     const pi = makePi();
     const deps = makeDeps();
-    const ctx = makeCtx({ customResponse: "run_tests" });
+    const ctx = makeCtx({ selectResponses: ["run_tests"] });
     registerArmoryCommand(pi as never, deps);
     const handler = getHandler(pi);
     await handler("edit", ctx as never);
 
     expect(loadToolsWithSource).toHaveBeenCalledWith("/project");
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
-    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    const [pickerPrompt, pickerNames] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(pickerPrompt).toContain("edit");
+    expect(pickerNames).toEqual(["run_tests"]);
     expect(showToolEditor).toHaveBeenCalledWith(
       ctx,
       expect.objectContaining({ name: "run_tests", destination: "project" }),
@@ -541,82 +536,23 @@ describe("handleDelete", () => {
     expect(approvalRegistry.has("session_tool")).toBe(false);
   });
 
-  it("shows the custom scrollable picker when no name given", async () => {
-    sessionRegistry.set("session_tool", toolSession);
-    vi.mocked(loadToolsWithSource).mockResolvedValue([]);
-
-    const pi = makePi();
-    const deps = makeDeps({ tools: [] });
-    const ctx = makeCtx({ customResponse: "session_tool", selectResponses: ["Cancel"] });
-    registerArmoryCommand(pi as never, deps);
-    const handler = getHandler(pi);
-    await handler("delete", ctx as never);
-
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
-    expect(ctx.ui.select).toHaveBeenCalledOnce();
-    const [confirmPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(confirmPrompt).toContain("session_tool");
-  });
-
-  it("falls back to ui.select when custom UI is unavailable", async () => {
+  it("uses ui.select when no name given", async () => {
     sessionRegistry.set("session_tool", toolSession);
     vi.mocked(loadToolsWithSource).mockResolvedValue([]);
 
     const pi = makePi();
     const deps = makeDeps({ tools: [] });
     const ctx = makeCtx({ selectResponses: ["session_tool", "Cancel"] });
-    ctx.ui.custom = vi.fn().mockResolvedValue(undefined);
     registerArmoryCommand(pi as never, deps);
     const handler = getHandler(pi);
     await handler("delete", ctx as never);
 
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
     expect(ctx.ui.select).toHaveBeenCalledTimes(2);
-    const [pickerPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [pickerPrompt, pickerNames] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(pickerPrompt).toContain("delete");
-  });
-
-  it("picker renders source labels and supports tabbing to session scope", async () => {
-    sessionRegistry.set("session_tool", toolSession);
-    vi.mocked(loadToolsWithSource).mockResolvedValue([
-      { tool: toolProject, source: "project" },
-      { tool: toolGlobal, source: "global" },
-    ]);
-
-    const rendered: string[] = [];
-    const ctx = makeCtx();
-    ctx.ui.custom = vi.fn(async (factory: unknown) => {
-      const component = (
-        factory as (
-          tui: unknown,
-          theme: unknown,
-          keybindings: unknown,
-          done: (value: string | null) => void,
-        ) => {
-          render(width: number): string[];
-          handleInput(data: string): void;
-        }
-      )({ requestRender: vi.fn() }, plainTheme(), undefined, vi.fn());
-
-      rendered.push(component.render(120).join("\n"));
-      component.handleInput("\t");
-      rendered.push(component.render(120).join("\n"));
-      return null;
-    });
-
-    const pi = makePi();
-    const deps = makeDeps({ tools: [] });
-    registerArmoryCommand(pi as never, deps);
-    const handler = getHandler(pi);
-    await handler("delete", ctx as never);
-
-    expect(rendered[0]).toContain("[session]");
-    expect(rendered[0]).toContain("[project]");
-    expect(rendered[0]).toContain("[global]");
-    expect(rendered[1]).toContain("Session");
-    expect(rendered[1]).toContain("[session]");
-    expect(rendered[1]).not.toContain("[project]");
-    expect(rendered[1]).not.toContain("[global]");
+    expect(pickerNames).toEqual(["session_tool"]);
+    const [confirmPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(confirmPrompt).toContain("session_tool");
   });
 });
 
