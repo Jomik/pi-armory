@@ -20,6 +20,26 @@ At startup, tools are loaded from project and global config (project overrides g
 
 The registry is never persisted. Resolution order for edit/delete is: session > project > global.
 
+## Extension interoperability
+
+Armory exposes project-configured tool names to other Pi extensions through the versioned `pi-armory:project-tools:v1` request event on Pi's shared event bus. The request payload contains a response callback. Armory calls it synchronously and exactly once with an array of tool names as stored in `.pi/armory.json`, sorted alphabetically; a project with no configured tools receives an empty array.
+
+Missing, unreadable, invalid-JSON, or schema-invalid project config all yield `[]`, the same as a project with no configured tools — a consumer cannot distinguish these cases.
+
+The result describes persisted project configuration, not the parent session's effective tool registry. A project tool remains in the result when a session-only tool shadows the same name because a new session will load the persisted project definition. Creating, moving, renaming, or deleting a project tool must be reflected in the next query, which re-reads the file fresh each time.
+
+A consumer treats only the first callback invocation as authoritative and checks whether it was invoked before event emission returns. No synchronous response means Armory is unavailable or incompatible, and the consumer falls back to its normal behavior. Armory registers one listener per loaded extension instance; Pi removes the old subscription when reloading extensions.
+
+The query only describes project-configured tool names. It does not grant tools, change Pi's active tools, or replace Pi's extension-level source metadata. Consumers remain responsible for authorization and user-facing grant flows. The listener must not throw; Pi contains and logs exceptions raised by consumer callbacks.
+
+### Non-goals
+
+- A generic per-tool metadata API in Pi core.
+- Exposing global or session-only Armory tools.
+- Push notifications or subscriptions for project-tool changes.
+- Exposing command definitions, secrets, or other Armory configuration through the query.
+- Automatically granting project tools to other sessions or agents.
+
 ## Core Design
 
 - Tools are shell commands with optional `{{param}}` template parameters

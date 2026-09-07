@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
-import { loadConfig, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
+import {
+  loadConfig,
+  loadProjectToolNamesSync,
+  loadToolWithSource,
+  removeFromConfig,
+  saveConfig,
+} from "../src/config.js";
 
 let tmpDir: string;
 let fakeHome: string;
@@ -251,6 +257,43 @@ describe("removeFromConfig", () => {
     const parsed = JSON.parse(content) as { tools: ArmoryTool[]; draftModel?: string };
     expect(parsed.draftModel).toBe("fast-model");
     expect(parsed.tools).toEqual([toolB]);
+  });
+});
+
+describe("loadProjectToolNamesSync", () => {
+  it("returns [] when project config does not exist", () => {
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+  });
+
+  it("returns project tool names sorted", async () => {
+    await writeProject([toolB, toolA]);
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual(["tool-a", "tool-b"]);
+  });
+
+  it("excludes global-only tools", async () => {
+    await writeGlobal([toolA]);
+    await writeProject([toolB]);
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual(["tool-b"]);
+  });
+
+  it("returns [] on invalid project JSON", async () => {
+    const dir = path.join(projectRoot, ".pi");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "armory.json"), "{bad json");
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+  });
+
+  it("returns [] on schema-invalid project config", async () => {
+    const dir = path.join(projectRoot, ".pi");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "armory.json"), JSON.stringify({ tools: [{ name: "t" }] }, null, 2));
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+  });
+
+  it("reflects current project config on each call (no caching)", async () => {
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+    await writeProject([toolA]);
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual(["tool-a"]);
   });
 });
 

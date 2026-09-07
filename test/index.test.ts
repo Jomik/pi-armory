@@ -14,7 +14,7 @@ vi.mock("../src/commands.js");
 vi.mock("../src/executor.js");
 vi.mock("../src/keychain.js");
 
-import { loadConfig } from "../src/config.js";
+import { loadConfig, loadProjectToolNamesSync } from "../src/config.js";
 import factory from "../src/index.js";
 import { approvalRegistry, registerArmoryTool } from "../src/register-tool.js";
 import { registerRequestTool } from "../src/request-tool.js";
@@ -40,7 +40,7 @@ const fakePi = {
   setActiveTools: vi.fn(),
   on: vi.fn(),
   registerTool: vi.fn(),
-  events: { emit: vi.fn() },
+  events: { emit: vi.fn(), on: vi.fn() },
 } as unknown as Parameters<typeof factory>[0];
 
 describe("factory", () => {
@@ -364,6 +364,60 @@ describe("factory", () => {
 
       expect(selectMock).toHaveBeenCalledOnce();
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
+    });
+  });
+
+  describe("pi-armory:project-tools:v1 listener", () => {
+    function getProjectToolsHandler() {
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePi.events.on as any).mock.calls.find(
+        ([event]: [string]) => event === "pi-armory:project-tools:v1",
+      );
+      return call?.[1] as ((payload: unknown) => void) | undefined;
+    }
+
+    it("registers a listener via pi.events.on", async () => {
+      await factory(fakePi);
+      expect(getProjectToolsHandler()).toBeDefined();
+    });
+
+    it("responds exactly once with current project tool names", async () => {
+      vi.mocked(loadProjectToolNamesSync).mockReturnValue(["tool-a", "tool-b"]);
+      await factory(fakePi);
+
+      const handler = getProjectToolsHandler();
+      const respond = vi.fn();
+      handler?.({ respond });
+
+      expect(loadProjectToolNamesSync).toHaveBeenCalledWith(process.cwd());
+      expect(respond).toHaveBeenCalledTimes(1);
+      expect(respond).toHaveBeenCalledWith(["tool-a", "tool-b"]);
+    });
+
+    it("queries fresh project config on every request", async () => {
+      await factory(fakePi);
+      const handler = getProjectToolsHandler();
+
+      vi.mocked(loadProjectToolNamesSync).mockReturnValue(["tool-a"]);
+      const respond1 = vi.fn();
+      handler?.({ respond: respond1 });
+      expect(respond1).toHaveBeenCalledWith(["tool-a"]);
+
+      vi.mocked(loadProjectToolNamesSync).mockReturnValue(["tool-a", "tool-b"]);
+      const respond2 = vi.fn();
+      handler?.({ respond: respond2 });
+      expect(respond2).toHaveBeenCalledWith(["tool-a", "tool-b"]);
+    });
+
+    it("ignores malformed payloads without throwing", async () => {
+      await factory(fakePi);
+      const handler = getProjectToolsHandler();
+
+      expect(() => handler?.(undefined)).not.toThrow();
+      expect(() => handler?.(null)).not.toThrow();
+      expect(() => handler?.({})).not.toThrow();
+      expect(() => handler?.({ respond: "not-a-function" })).not.toThrow();
+      expect(() => handler?.("string")).not.toThrow();
     });
   });
 });

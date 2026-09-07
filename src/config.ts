@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -34,6 +35,24 @@ function parseToolsJson(content: string, filePath: string, onInvalid: string): A
 
 function resolveConfigPath(destination: "project" | "global", projectRoot: string, agentDir: string): string {
   return destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(agentDir, "armory.json");
+}
+
+/**
+ * Synchronously loads the tool names declared in <projectRoot>/.pi/armory.json.
+ * Excludes global and session-only tools. Missing, invalid, or unreadable
+ * project config returns [] rather than throwing.
+ */
+export function loadProjectToolNamesSync(projectRoot: string): string[] {
+  const projectPath = path.join(projectRoot, ".pi", "armory.json");
+  let content: string;
+  try {
+    content = readFileSync(projectPath, "utf-8");
+  } catch {
+    return [];
+  }
+  const config = parseToolsJson(content, projectPath, "ignoring");
+  if (!config) return [];
+  return config.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
 }
 
 async function readConfigFile(filePath: string): Promise<ArmoryConfig> {

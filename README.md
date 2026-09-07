@@ -156,6 +156,25 @@ Storage (macOS Keychain, service `pi-armory`) and output redaction are unchanged
 
 Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included.
 
+## Extension interoperability
+
+Other Pi extensions can query Armory's project-configured tool names via the `pi-armory:project-tools:v1` event on Pi's shared event bus:
+
+```js
+pi.events.emit("pi-armory:project-tools:v1", {
+  respond(toolNames) {
+    // called synchronously, at most once
+  },
+});
+```
+
+The request payload is `{ respond(toolNames: string[]): void }`. Armory calls `respond` synchronously and exactly once. Only the first response counts - if a consumer checks whether `respond` was already invoked by the time `emit` returns, later or duplicate calls can be ignored.
+
+- `undefined` (no synchronous call to `respond`) means Armory is absent or an incompatible version - fall back to normal behavior.
+- `[]` means Armory responded but there are no readable, valid project tools.
+
+Names are returned as stored in `.pi/armory.json`, sorted alphabetically. Global and session-only tools are excluded; a project tool remains listed even when a session-only tool shadows the same name. The file is read fresh on every query. A missing file, unreadable file, invalid JSON, or schema-invalid config all produce `[]`, so consumers cannot distinguish those cases from a project with no configured tools.
+
 ## Managing tools
 
 ### Editing tools
