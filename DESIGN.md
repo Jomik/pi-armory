@@ -1,5 +1,7 @@
 # pi-armory Design
 
+All interactive workflows (bootstrapping, editing, approval, secrets, onboarding) are built from Pi's native dialog primitives — `select`, `input`, `editor`, `notify` — so they work identically on the TUI and on RPC clients such as Paseo. There is no custom/bespoke UI surface; review flows are driven by repeated native select menus rather than a single freeform panel.
+
 ## Tool destinations
 
 Tools have three possible destinations:
@@ -56,7 +58,7 @@ The registry is never persisted. Resolution order for edit/delete is: session > 
 
 Onboarding is a human-initiated batch wrapper around the existing tool drafting and review flow. It helps bootstrap a project by asking the draft model what common development operations an agent should have tools for, then lets the user choose which proposed requests should become actual armory tools.
 
-The onboarding flow deliberately proposes **candidate tool requests**, not final tools. A candidate request contains a short label, a command, and reasoning/context suitable for the existing `request_tool` drafter. The user multi-selects which candidates are worth drafting. Each selected candidate is then passed through the same single-tool draft/editor/approval path used by `request_tool`, so naming, descriptions, guidelines, approval flags, destination choice, validation, saving, and registration remain centralized in the existing flow.
+The onboarding flow deliberately proposes **candidate tool requests**, not final tools. A candidate request contains a short label, a command, and reasoning/context suitable for the existing `request_tool` drafter. The user multi-selects which candidates are worth drafting via a repeated native select-menu toggle loop (toggle individual candidates, select/clear all, then confirm). Each selected candidate is then passed through the same single-tool draft/editor/approval path used by `request_tool`, so naming, descriptions, guidelines, approval flags, destination choice, validation, saving, and registration remain centralized in the existing flow.
 
 The user participates at two points:
 
@@ -213,7 +215,7 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 
 - At execution time, secrets are fetched from keychain and injected as environment variables
 - Secret values are redacted from all tool output (both streamed updates and final result)
-- `/armory secrets` opens a TUI panel to manage stored keychain entries (set/delete)
+- `/armory secrets` opens a native select menu to manage stored keychain entries (account list → status/action menu for set/update or delete). Setting or updating a value is collected by a local macOS `osascript` hidden-answer dialog (native, not a Pi dialog), so the secret value itself never traverses the Pi/Paseo UI layer or transcript
 - If a secret is missing from keychain at execution time, the fetch throws an error
 
 1. Agent calls `request_tool` with `{ command, reasoning, context? }`
@@ -224,10 +226,9 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
    - If the model lacks sufficient context (e.g., script contents not provided), it rejects with a reason
    - The agent receives `"Draft rejected: <reason>"` and can retry with more context
 3. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
-4. A custom TUI form is shown (via `ctx.ui.custom`) where the human can:
-   - See the proposed tool
-   - Edit name, command, description inline
-   - Add/remove guidelines
+4. A repeated native select menu is shown (the tool form) where the human can:
+   - See the proposed tool summarized in the menu title
+   - Choose a field to edit — name/re-draft instruction via `ui.input`, command/description via `ui.editor`, add/remove guidelines via `ui.input`
    - Toggle `requires_approval`
    - Choose destination: session (default), project-local, or global
    - Approve or reject (with optional reason)
@@ -240,14 +241,14 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 
 1. Agent calls a tool that has `requires_approval: true`
 2. If no UI is available (`ctx.hasUI` is false), the call is blocked immediately with a rejection message; the `herdr:blocked` active/inactive lifecycle still fires around the check
-3. Otherwise, an approval panel is shown displaying the command template (not fully interpolated) alongside the structured parameters for the current values. Edit is offered only when the command has parameters
+3. Otherwise, a native select menu is shown whose title displays the command template (not fully interpolated) alongside the structured parameters for the current values. Edit is offered only when the command has parameters
 4. The review loop repeats until the human explicitly runs or rejects:
    - **Run** → command executes with the current parameters, output returned to agent
    - **Reject** → agent gets a rejection message, command does not run
    - **Edit** → `ctx.ui.editor` opens with the current parameters as pretty-printed JSON
-     - Cancel returns to the panel unchanged
+     - Cancel returns to the review menu unchanged
      - Invalid JSON or parameters failing the tool's TypeBox schema are reported via notification, and the human can retry the editor or cancel
-     - A valid edit replaces the tool call's input and returns to the panel for another review pass; the edited command must be reviewed again before it can run
+     - A valid edit replaces the tool call's input and returns to the review menu for another review pass; the edited command must be reviewed again before it can run
 
 ## Output handling
 
@@ -265,7 +266,7 @@ Human-initiated flow to revise existing tools, with optional AI assistance.
 
 1. `/armory edit [name]` — if name omitted, show a select list of all registered tools (session, project, global)
 2. Load the tool's current definition using session > project > global precedence
-3. Open the same TUI form used by `request_tool`, pre-populated with current values
+3. Open the same native tool-review menu used by `request_tool`, pre-populated with current values
 4. Human edits fields directly, or navigates to the Re-draft field and presses Enter to invoke AI re-draft
 5. If the destination changed, show a confirmation describing the persistence/scope consequence
 6. On approve, save back to the selected destination
@@ -288,10 +289,10 @@ The re-draft prompt includes the current definition as structured context (not j
 
 ### Architecture
 
-- Extract the TUI form from `request-tool.ts` into a shared component (e.g. `tool-form.ts`)
-- Both `request_tool` execute and `/armory edit` handler call into the same form
+- The tool form lives in `tool-form.ts`, shared by `request_tool` execute and the `/armory edit` handler
+- It drives review/editing via a repeated native select menu (field list + actions), falling back to `ui.input`/`ui.editor` for individual field edits — no custom/bespoke UI surface
 - The form accepts an initial state (either from a fresh draft or from an existing tool)
-- The Re-draft field triggers an async re-draft; form shows a spinner while waiting, then updates
+- The Re-draft field triggers an async re-draft via `ui.input` for the instruction, then updates the menu in place
 - The draft function gains a revision signature that accepts a full current definition, optional instruction, and optional original request context (not just a raw command)
 
 ### Draft function for revisions

@@ -30,6 +30,8 @@ See [DESIGN.md](./DESIGN.md) for the full specification.
 
 pi-armory provides a fixed set of named command tools. Each tool runs a shell command with optional `{{parameter}}` placeholders - values are shell-escaped before interpolation.
 
+All interactive review, editing, and secrets flows use Pi's native dialogs (`select`, `input`, `editor`), so they work the same in the TUI and in RPC clients such as Paseo. There is no custom/bespoke UI panel.
+
 ### Config
 
 Tools are defined in `.pi/armory.json` (project-local) or `~/.pi/agent/armory.json` (global). Both are loaded; project tools override global tools with the same name.
@@ -77,7 +79,7 @@ Values are shell-escaped before substitution. No separate `parameters` config fi
 
 ### Bootstrapping
 
-Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via an interactive form:
+Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via a native review flow — a repeated select menu (with input/editor dialogs for individual fields) — that works identically in the TUI and in RPC clients such as Paseo:
 
 ```
 Agent calls: request_tool({
@@ -86,7 +88,7 @@ Agent calls: request_tool({
   context: "<contents of scripts/deploy.sh>"
 })
 → Draft model produces a full tool definition (or rejects if context is insufficient)
-→ Human sees a TUI form, can edit fields, add/remove guidelines, toggle approval, choose destination
+→ Human sees a native review menu, can edit fields, add/remove guidelines, toggle approval, choose destination
 → On approve:
     Session  - registered in-memory only, available next turn, gone when the session ends
     Project  - saved to .pi/armory.json and available next turn
@@ -104,13 +106,13 @@ Tool names are automatically normalized to lowercase with underscores (e.g., "Ru
 
 Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
 
-The review prompt is inline (non-floating) and scrolls to accommodate long commands or parameters. Actions:
+The review prompt is a native select menu whose title shows the command and its parameters. Actions:
 
 - **Run** - execute the command with the displayed parameters
 - **Edit** - shown only when the tool has parameters; opens the tool call's parameter JSON in pi's standard editor for direct editing
 - **Reject** - decline; execution does not proceed
 
-Edits are schema-validated; once valid, the view returns to the readable review before you can Run. Press **Ctrl+G** while editing to open the same content in pi's configured external editor, with pi's normal editor-selection fallbacks. Calls made without a UI (e.g., headless/non-interactive runs) are blocked outright. See [DESIGN.md](DESIGN.md) for implementation details.
+Edits are schema-validated; once valid, the view returns to the review menu before you can Run. Calls made without a UI (e.g., headless/non-interactive runs) are blocked outright. See [DESIGN.md](DESIGN.md) for implementation details.
 
 ### Environment variables
 
@@ -136,6 +138,17 @@ Values support three forms:
 > **⚠️ `env` values are visible in tool output shown to the LLM.** Do not put secrets here. Use the `secrets` field for sensitive values - those are stored in the macOS Keychain and redacted from all output.
 
 When both `env` and `secrets` define the same key, secrets take precedence and the env entry is skipped.
+
+#### Managing secrets
+
+`/armory secrets` walks a native select-menu flow to manage Keychain-backed secrets:
+
+1. An account list menu shows each configured secret account and whether it's currently found in the Keychain.
+2. Selecting an account opens a status/action menu (`Set/update`, `Delete` if present, `Back`).
+3. **Set/update** collects the value via a local macOS `osascript` hidden-answer dialog (a native system dialog, not a Pi dialog) - the value is never shown in or transmitted through the Pi/Paseo UI or transcript, only the resulting save/failure notification is.
+4. **Delete** requires a native confirm/cancel selection before removing the entry.
+
+Storage (macOS Keychain, service `pi-armory`) and output redaction are unchanged by the UI used to manage entries.
 
 ### Output
 
@@ -168,3 +181,11 @@ Cancelling the confirmation aborts the edit — no config or registry is modifie
 - **Global tools** — removed from `~/.pi/agent/armory.json`
 
 All deletions require confirmation. Deleting a tool deactivates that name for the current session unless removing a higher-precedence tool reveals a lower-precedence persisted tool with the same name.
+
+### Onboarding
+
+`/armory onboard` asks the configured draft model what common development operations this project needs tools for, then lets you pick which to draft:
+
+1. A native select menu lists proposed candidates as a repeated toggle loop - toggle individual candidates on/off, or `Select all`/`Clear all`, then `Confirm` or `Cancel`.
+2. Each selected candidate goes through the same draft/review flow as `request_tool` (native review menu, edit fields, choose destination, approve/reject).
+3. Approved tools are saved and registered exactly like tools created via `request_tool`, available next turn.

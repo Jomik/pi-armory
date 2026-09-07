@@ -39,8 +39,7 @@ function formatGuidelinesForTitle(guidelines: string[]): string {
 
 /**
  * Drive tool review/editing via a repeated native select menu, falling back to
- * ui.input/ui.editor for individual field edits. Replaces the previous
- * ctx.ui.custom-based TUI panel.
+ * ui.input/ui.editor for individual field edits.
  */
 export async function toolFormPanel(
   ui: ToolFormUI,
