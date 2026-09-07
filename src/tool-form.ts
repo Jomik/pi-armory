@@ -108,7 +108,10 @@ export async function toolFormPanel(
 
     if (choice === "Add guideline") {
       const value = await ui.input("New guideline");
-      if (value !== undefined && value.trim()) guidelines = [...guidelines, value];
+      if (value !== undefined) {
+        const trimmed = value.trim();
+        if (trimmed) guidelines = [...guidelines, trimmed];
+      }
       continue;
     }
 
@@ -153,9 +156,17 @@ export async function toolFormPanel(
     const editMatch = choice !== undefined ? EDIT_GUIDELINE_RE.exec(choice) : null;
     if (editMatch?.[1]) {
       const index = Number(editMatch[1]) - 1;
+      if (index < 0 || index >= guidelines.length) {
+        return { rejected: true, reason: "" };
+      }
       const value = await ui.input(`Guideline ${index + 1}`, guidelines[index]);
       if (value !== undefined) {
-        guidelines = guidelines.map((g, i) => (i === index ? value : g));
+        const trimmed = value.trim();
+        if (trimmed) {
+          guidelines = guidelines.map((g, i) => (i === index ? trimmed : g));
+        } else {
+          guidelines = guidelines.filter((_, i) => i !== index);
+        }
       }
       continue;
     }
@@ -163,6 +174,9 @@ export async function toolFormPanel(
     const removeMatch = choice !== undefined ? REMOVE_GUIDELINE_RE.exec(choice) : null;
     if (removeMatch?.[1]) {
       const index = Number(removeMatch[1]) - 1;
+      if (index < 0 || index >= guidelines.length) {
+        return { rejected: true, reason: "" };
+      }
       guidelines = guidelines.filter((_, i) => i !== index);
       continue;
     }

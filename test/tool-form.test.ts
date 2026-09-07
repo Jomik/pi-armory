@@ -66,6 +66,36 @@ describe("toolFormPanel guideline editing", () => {
 
     expect((result as ToolFormResult).guidelines).toEqual([]);
   });
+
+  it("trims whitespace when adding a guideline", async () => {
+    const select = queue("Add guideline", "Save");
+    const input = queue("  spaced out  ");
+    const ui = makeUi({ select, input });
+
+    const result = await toolFormPanel(ui, { ...baseState, guidelines: [] });
+
+    expect((result as ToolFormResult).guidelines).toEqual(["spaced out"]);
+  });
+
+  it("trims whitespace when editing a guideline", async () => {
+    const select = queue("Edit guideline 1", "Save");
+    const input = queue("  updated  ");
+    const ui = makeUi({ select, input });
+
+    const result = await toolFormPanel(ui, { ...baseState, guidelines: ["first"] });
+
+    expect((result as ToolFormResult).guidelines).toEqual(["updated"]);
+  });
+
+  it("deletes a guideline when edited to blank/whitespace", async () => {
+    const select = queue("Edit guideline 1", "Save");
+    const input = queue("   ");
+    const ui = makeUi({ select, input });
+
+    const result = await toolFormPanel(ui, { ...baseState, guidelines: ["first", "second"] });
+
+    expect((result as ToolFormResult).guidelines).toEqual(["second"]);
+  });
 });
 
 describe("toolFormPanel field editing", () => {
@@ -174,6 +204,24 @@ describe("toolFormPanel rejection and fail-closed cancellation", () => {
     const ui = makeUi({ select });
 
     const result = await toolFormPanel(ui, baseState);
+
+    expect(result).toEqual({ rejected: true, reason: "" });
+  });
+
+  it("fails closed on an out-of-range edit guideline index", async () => {
+    const select = queue("Edit guideline 5");
+    const ui = makeUi({ select });
+
+    const result = await toolFormPanel(ui, { ...baseState, guidelines: ["first"] });
+
+    expect(result).toEqual({ rejected: true, reason: "" });
+  });
+
+  it("fails closed on an out-of-range remove guideline index", async () => {
+    const select = queue("Remove guideline 5");
+    const ui = makeUi({ select });
+
+    const result = await toolFormPanel(ui, { ...baseState, guidelines: ["first"] });
 
     expect(result).toEqual({ rejected: true, reason: "" });
   });
