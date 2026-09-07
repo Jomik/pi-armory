@@ -1,6 +1,6 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { registerArmoryCommand } from "./commands.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadProjectToolNamesSync } from "./config.js";
 import { parsePlaceholders } from "./placeholders.js";
 import {
   approvalRegistry,
@@ -120,6 +120,18 @@ const factory: ExtensionFactory = async (pi) => {
     if (event.toolName === "request_tool") {
       requestToolInFlight = false;
     }
+  });
+
+  pi.events.on("pi-armory:project-tools:v1", (payload) => {
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      typeof (payload as { respond?: unknown }).respond !== "function"
+    ) {
+      return;
+    }
+    const { respond } = payload as { respond: (toolNames: string[]) => void };
+    respond(loadProjectToolNamesSync(projectRoot));
   });
 
   registerRequestTool(pi, projectRoot, draftModel);
