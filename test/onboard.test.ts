@@ -278,8 +278,8 @@ describe("handleOnboard — multi-select", () => {
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
-    const calls = vi.mocked(ctx.ui.select).mock.calls;
-    const firstTitle = calls[0]?.[0] as string;
+    const calls = vi.mocked(ctx.ui.select).mock.calls as unknown as [string, string[]][];
+    const firstTitle = calls[0]?.[0];
     expect(firstTitle).toContain("[ ] 1. Run tests");
     expect(firstTitle).toContain("Command: npm test");
     expect(firstTitle).toContain("Reasoning: Run the test suite in CI.");
@@ -287,11 +287,11 @@ describe("handleOnboard — multi-select", () => {
     expect(firstTitle).toContain("Command: biome check");
     expect(firstTitle).toContain("Reasoning: Lint code.");
 
-    const secondTitle = calls[1]?.[0] as string;
+    const secondTitle = calls[1]?.[0];
     expect(secondTitle).toContain("[x] 1. Run tests");
     expect(secondTitle).toContain("[ ] 2. Lint");
 
-    const firstOptions = calls[0]?.[1] as string[];
+    const firstOptions = calls[0]?.[1];
     expect(firstOptions).toEqual(["Toggle 1", "Toggle 2", "Select all", "Clear all", "Confirm", "Cancel"]);
   });
 });

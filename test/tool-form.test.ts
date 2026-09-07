@@ -177,7 +177,8 @@ describe("toolFormPanel re-draft", () => {
 
     await toolFormPanel(ui, baseState);
 
-    const options = select.mock.calls[0]?.[1] as string[];
+    const calls = select.mock.calls as unknown as [string, string[]][];
+    const options = calls[0]?.[1];
     expect(options).not.toContain("Re-draft");
   });
 });
