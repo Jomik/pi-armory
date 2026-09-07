@@ -192,7 +192,6 @@ async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
         notify: (msg, type) => ctx.ui.notify(msg, type),
         accounts,
       }),
-    { overlay: true, overlayOptions: { anchor: "center", width: 50, maxHeight: "60%" } },
   );
 }
 

@@ -98,7 +98,7 @@ export function interpolateCommand(command: string, params: Record<string, unkno
   return collapseUnquotedSpaces(result);
 }
 
-function buildParamSchema(tool: ArmoryTool): TObject {
+export function buildParamSchema(tool: ArmoryTool): TObject {
   const parsed = parsePlaceholders(tool.command);
   if (parsed.length === 0) return Type.Object({});
 
@@ -180,6 +180,23 @@ async function resolveToolEnvironment(
   }
 
   return { extraEnv, redact };
+}
+
+/**
+ * Validates params against a schema, returning either the validated value or a
+ * human-readable error message. Shared by tool execution and approval-panel edits
+ * so both paths enforce identical rules and produce identical error text.
+ */
+export function validateToolParams(
+  schema: TSchema,
+  params: unknown,
+): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
+  if (!Value.Check(schema, params)) {
+    const errors = Value.Errors(schema, params);
+    const message = errors.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("; ");
+    return { ok: false, message };
+  }
+  return { ok: true, value: params as Record<string, unknown> };
 }
 
 /** Tools with requires_approval, keyed by name. Updated by registerArmoryTool. */
@@ -271,13 +288,12 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Validate parameters against schema
-      if (!Value.Check(schema, params)) {
-        const errors = Value.Errors(schema, params);
-        const msg = errors.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("; ");
-        throw new Error(`Invalid parameters: ${msg}`);
+      const validated = validateToolParams(schema, params);
+      if (!validated.ok) {
+        throw new Error(`Invalid parameters: ${validated.message}`);
       }
 
-      const command = interpolateCommand(tool.command, params as Record<string, unknown>);
+      const command = interpolateCommand(tool.command, validated.value);
       const { extraEnv, redact } = await resolveToolEnvironment(tool);
 
       const output = await executeCommand(command, {

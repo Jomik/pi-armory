@@ -238,9 +238,8 @@ async function showCandidateSelector(
   ctx: Pick<ExtensionCommandContext, "ui">,
   candidates: CandidateRequest[],
 ): Promise<CandidateRequest[] | null> {
-  return ctx.ui.custom<CandidateRequest[] | null>(
-    (tui, theme, _keybindings, done) => candidateSelectorPanel(tui, theme, done, candidates),
-    { overlay: true, overlayOptions: { anchor: "center", width: "70%", maxHeight: "80%" } },
+  return ctx.ui.custom<CandidateRequest[] | null>((tui, theme, _keybindings, done) =>
+    candidateSelectorPanel(tui, theme, done, candidates),
   );
 }
 
