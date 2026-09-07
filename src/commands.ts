@@ -221,13 +221,19 @@ async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
     const { found } = await listSecrets(accounts);
     const foundSet = new Set(found);
     const choice = await ctx.ui.select(secretStatusTitle(accounts, foundSet), [...accounts, "Close"]);
-    if (!choice || choice === "Close") return;
+    if (choice === "Close") return;
+    // Fail closed on any response that isn't a configured account: never proceed to the
+    // next prompt or a keychain operation on an unexpected/malformed answer.
+    if (!choice || !accounts.includes(choice)) return;
 
     const account = choice;
     const isFound = foundSet.has(account);
     const options = isFound ? ["Set/update", "Delete", "Back"] : ["Set/update", "Back"];
     const action = await ctx.ui.select(`${account} — ${isFound ? "found" : "missing"}`, options);
-    if (!action || action === "Back") continue;
+    // Fail closed unless the response is exactly one of the options actually offered.
+    // In particular, "Delete" must never execute when it wasn't offered (missing account).
+    if (!action || !options.includes(action)) return;
+    if (action === "Back") continue;
 
     if (action === "Set/update") {
       await handleSetSecret(ctx, account);

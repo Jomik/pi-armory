@@ -805,6 +805,57 @@ describe("handleSecrets", () => {
 
     expect(ctx.ui.select).toHaveBeenCalledOnce();
   });
+
+  it("malformed/unconfigured account response fails closed with no further prompt or keychain op", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["not_a_real_account"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    // Only the top-level select happened; no follow-up prompt or keychain mutation.
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
+    expect(removeSecret).not.toHaveBeenCalled();
+  });
+
+  it("malformed action response fails closed with no prompt/add/remove", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Nuke everything"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(ctx.ui.select).toHaveBeenCalledTimes(2);
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
+    expect(removeSecret).not.toHaveBeenCalled();
+  });
+
+  it("Delete action not offered for a missing account fails closed and does not remove", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    // Attacker/response supplies "Delete" even though it wasn't offered (missing account only offers Set/update, Back).
+    const ctx = makeCtx({ selectResponses: ["my_account", "Delete"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    const [, actionOptions] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(actionOptions).not.toContain("Delete");
+    expect(removeSecret).not.toHaveBeenCalled();
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleOnboard command routing", () => {

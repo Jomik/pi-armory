@@ -171,3 +171,46 @@ describe("removeSecret", () => {
     await expect(removeSecret("account")).rejects.toThrow(/failed to remove secret 'account'/);
   });
 });
+
+describe("promptHiddenAnswer", () => {
+  beforeEach(() => {
+    mockExecFile.mockReset();
+  });
+
+  it("invokes osascript with a fixed script and the account as a separate final arg", async () => {
+    mockResolve(ok("my-secret\n"));
+    await promptHiddenAnswer("my-account");
+
+    expect(mockExecFile).toHaveBeenCalledOnce();
+    const [cmd, cmdArgs] = mockExecFile.mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("osascript");
+    expect(cmdArgs[0]).toBe("-e");
+    expect(cmdArgs[1]).toContain("with hidden answer");
+    // The account must be its own final argv entry, never concatenated/embedded into the script.
+    expect(cmdArgs[cmdArgs.length - 1]).toBe("my-account");
+    expect(cmdArgs[1]).not.toContain("my-account");
+  });
+
+  it("strips a single trailing newline from stdout on success", async () => {
+    mockResolve(ok("super-secret-value\n"));
+    const result = await promptHiddenAnswer("my-account");
+    expect(result).toBe("super-secret-value");
+  });
+
+  it("returns null when the error message contains -128 (user cancelled)", async () => {
+    mockReject(new Error("execution error: (-128)"));
+    const result = await promptHiddenAnswer("my-account");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the error message contains 'User canceled'", async () => {
+    mockReject(new Error("User canceled. (-128)"));
+    const result = await promptHiddenAnswer("my-account");
+    expect(result).toBeNull();
+  });
+
+  it("throws a descriptive error for other failures", async () => {
+    mockReject(new Error("osascript is not allowed to send Apple events"));
+    await expect(promptHiddenAnswer("my-account")).rejects.toThrow(/failed to prompt for secret value/);
+  });
+});
