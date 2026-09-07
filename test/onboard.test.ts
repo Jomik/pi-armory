@@ -87,10 +87,15 @@ function makePi() {
 }
 
 function makeCtx(
-  opts: { customResponses?: unknown[]; modelResolved?: boolean; authOk?: boolean; sessionModel?: unknown } = {},
+  opts: {
+    selectResponses?: (string | undefined)[];
+    modelResolved?: boolean;
+    authOk?: boolean;
+    sessionModel?: unknown;
+  } = {},
 ) {
-  const { customResponses = [], modelResolved = true, authOk = true, sessionModel = undefined } = opts;
-  const customQueue = [...customResponses];
+  const { selectResponses = [], modelResolved = true, authOk = true, sessionModel = undefined } = opts;
+  const selectQueue = [...selectResponses];
 
   vi.mocked(resolveModel).mockReturnValue(modelResolved ? fakeResolvedModel : undefined);
 
@@ -101,7 +106,7 @@ function makeCtx(
     model: sessionModel,
     ui: {
       notify: vi.fn(),
-      custom: vi.fn(async () => customQueue.shift() ?? null),
+      select: vi.fn(async () => selectQueue.shift()),
     },
   };
   return ctx;
@@ -176,7 +181,7 @@ describe("handleOnboard — candidate generation failures", () => {
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("No tool candidates"), "info");
-    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    expect(ctx.ui.select).not.toHaveBeenCalled();
   });
 });
 
@@ -188,9 +193,9 @@ describe("handleOnboard — multi-select", () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  it("returns without registering tools when multi-select is cancelled (null)", async () => {
+  it("returns without registering tools when multi-select is cancelled", async () => {
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [null] });
+    const ctx = makeCtx({ selectResponses: ["Cancel"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -198,14 +203,96 @@ describe("handleOnboard — multi-select", () => {
     expect(mockDraft).not.toHaveBeenCalled();
   });
 
-  it("notifies when no candidates are selected (empty array)", async () => {
+  it("fails closed and returns when select returns an unexpected/undefined response", async () => {
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[]] });
+    const ctx = makeCtx({ selectResponses: [undefined] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(mockDraft).not.toHaveBeenCalled();
+  });
+
+  it("notifies when confirming with no candidates toggled (empty selection)", async () => {
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
     expect(ctx.ui.notify).toHaveBeenCalledWith("No candidates selected.", "info");
     expect(registerArmoryTool).not.toHaveBeenCalled();
+  });
+
+  it("toggles a candidate on then off, leaving selection empty on confirm", async () => {
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Toggle 1", "Confirm"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("No candidates selected.", "info");
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+  });
+
+  it("selects a candidate via toggle then confirms", async () => {
+    vi.mocked(mockDraft).mockResolvedValue(sampleDraft);
+    vi.mocked(showToolEditor).mockResolvedValue({ rejected: true, reason: "" });
+
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(mockDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects all candidates via 'Select all' then confirms", async () => {
+    const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
+    vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
+    vi.mocked(mockDraft).mockResolvedValue(sampleDraft);
+    vi.mocked(showToolEditor).mockResolvedValue({ rejected: true, reason: "" });
+
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Select all", "Confirm"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(mockDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a selection via 'Clear all' before confirming", async () => {
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Select all", "Clear all", "Confirm"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("No candidates selected.", "info");
+    expect(mockDraft).not.toHaveBeenCalled();
+  });
+
+  it("presents every candidate's selected state, label, command, and reasoning in the title", async () => {
+    const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
+    vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
+
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Cancel"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    const calls = vi.mocked(ctx.ui.select).mock.calls;
+    const firstTitle = calls[0]?.[0] as string;
+    expect(firstTitle).toContain("[ ] 1. Run tests");
+    expect(firstTitle).toContain("Command: npm test");
+    expect(firstTitle).toContain("Reasoning: Run the test suite in CI.");
+    expect(firstTitle).toContain("[ ] 2. Lint");
+    expect(firstTitle).toContain("Command: biome check");
+    expect(firstTitle).toContain("Reasoning: Lint code.");
+
+    const secondTitle = calls[1]?.[0] as string;
+    expect(secondTitle).toContain("[x] 1. Run tests");
+    expect(secondTitle).toContain("[ ] 2. Lint");
+
+    const firstOptions = calls[0]?.[1] as string[];
+    expect(firstOptions).toEqual(["Toggle 1", "Toggle 2", "Select all", "Clear all", "Confirm", "Cancel"]);
   });
 });
 
@@ -224,7 +311,7 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -251,7 +338,7 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -275,20 +362,29 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(buildToolFromResult).mockReturnValue(builtLintTool);
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate, secondCandidate]] });
+    // Toggle candidate 2 before candidate 1 — confirmed output must preserve original candidate order.
+    const ctx = makeCtx({ selectResponses: ["Toggle 2", "Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
     expect(showToolEditor).toHaveBeenCalledTimes(2);
     expect(registerArmoryTool).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 registered, 1 skipped"), "info");
+    // First drafted candidate must be sampleCandidate (original order), not the last-toggled one.
+    expect(mockDraft).toHaveBeenNthCalledWith(1, fakeResolvedModel, expect.anything(), expect.objectContaining({ command: "npm test" }));
+    expect(mockDraft).toHaveBeenNthCalledWith(
+      2,
+      fakeResolvedModel,
+      expect.anything(),
+      expect.objectContaining({ command: "biome check" }),
+    );
   });
 
   it("skips a candidate when draft is rejected by model", async () => {
     vi.mocked(mockDraft).mockResolvedValue({ rejected: true as const, reason: "Need script contents" });
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -304,7 +400,7 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(showToolEditor).mockResolvedValue(reservedResult);
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -323,7 +419,7 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(showToolEditor).mockResolvedValue({ rejected: true, reason: "" });
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[candidateWithContext]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
@@ -340,7 +436,7 @@ describe("handleOnboard — per-candidate flow", () => {
     vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
 
     const pi = makePi();
-    const ctx = makeCtx({ customResponses: [[sampleCandidate]] });
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
 
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
