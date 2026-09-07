@@ -172,7 +172,11 @@ If you change the **Destination** field, a confirmation is shown before the chan
 | Project → Global | Moved to global config; available in all projects |
 | Global → Project | Saved to project config and removed from global config; other projects lose access to it |
 
+Renaming a tool during edit uses the same normalization, validation, and reserved-name rules as `request_tool`: the name is lowercased and normalized, must contain at least one letter, and cannot be `request_tool`. If the result is invalid or reserved, a notification explains why and the edit aborts with no config or registry changes.
+
 Cancelling the confirmation aborts the edit — no config or registry is modified.
+
+When editing, AI re-draft can be invoked from the Re-draft field. If the draft model returns nothing (unavailable), a `Re-draft unavailable` notification is shown; if re-drafting throws, a `Re-draft failed` notification is shown. Either way, the form returns to the review menu with the current state unchanged.
 
 ### Deleting tools
 

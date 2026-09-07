@@ -270,9 +270,10 @@ Human-initiated flow to revise existing tools, with optional AI assistance.
 2. Load the tool's current definition using session > project > global precedence
 3. Open the same native tool-review menu used by `request_tool`, pre-populated with current values
 4. Human edits fields directly, or navigates to the Re-draft field and presses Enter to invoke AI re-draft
-5. If the destination changed, show a confirmation describing the persistence/scope consequence
-6. On approve, save back to the selected destination
-7. On reject or cancelled scope-change confirmation, no changes
+5. The edited name is normalized and validated using the same rules as `request_tool` (`normalizeName`, `VALID_NAME`, `RESERVED_NAMES`): if the result is empty, has no letter, or is a reserved name (`request_tool`), a notification explains the problem and the edit aborts before any persistence or registry mutation
+6. If the destination changed, show a confirmation describing the persistence/scope consequence
+7. On approve, save back to the selected destination
+8. On reject, invalid/reserved name, or cancelled scope-change confirmation, no changes
 
 ### AI re-draft
 
@@ -286,6 +287,8 @@ Available in both `request_tool` and `/armory edit` forms:
    - Original `request_tool` input (`command`, `reasoning`, and optional `context`) when re-drafting a freshly requested tool
 4. LLM returns an updated definition; form fields update in place
 5. User can re-draft again, edit manually, or approve/reject
+
+If the re-draft callback returns a falsy result (unavailable), a `Re-draft unavailable` notification is shown; if the callback throws, a `Re-draft failed` notification is shown. In both cases the form returns to the review menu with all fields left at their current values — no state change.
 
 The re-draft prompt includes the current definition as structured context (not just the raw command). For `request_tool` forms it also carries forward the original request context, so the model can preserve intent and use provided script/file context while applying the latest user instruction. `/armory edit` forms do not have original request context, so they send only the current definition and instruction.
 
