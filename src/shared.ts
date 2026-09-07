@@ -87,7 +87,7 @@ export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTo
 interface ShowToolEditorContext {
   modelRegistry: ModelRegistry;
   model?: unknown;
-  ui: Pick<ExtensionUIContext, "custom">;
+  ui: Pick<ExtensionUIContext, "select" | "input" | "editor" | "notify">;
 }
 
 export async function showToolEditor(
@@ -105,10 +105,8 @@ export async function showToolEditor(
   }
 
   const dm = draftModel;
-  return ctx.ui.custom<ToolFormResult | ToolFormRejection>((tui, theme, _keybindings, done) => {
-    const callbacks: ToolFormCallbacks = {
-      onRedraft: dm ? makeRedraftCallback(ctx, dm, originalRequest) : undefined,
-    };
-    return toolFormPanel(tui, theme, done, initialState, callbacks);
-  });
+  const callbacks: ToolFormCallbacks = {
+    onRedraft: dm ? makeRedraftCallback(ctx, dm, originalRequest) : undefined,
+  };
+  return toolFormPanel(ctx.ui, initialState, callbacks);
 }

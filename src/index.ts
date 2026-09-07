@@ -1,5 +1,4 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { type ApprovalAction, createApprovalPanel } from "./approval-panel.js";
 import { registerArmoryCommand } from "./commands.js";
 import { loadConfig } from "./config.js";
 import { parsePlaceholders } from "./placeholders.js";
@@ -69,14 +68,16 @@ const factory: ExtensionFactory = async (pi) => {
       const allowEdit = parsePlaceholders(tool.command).length > 0;
 
       for (;;) {
-        const action = await ctx.ui.custom<ApprovalAction>((tui, theme, _kb, done) =>
-          createApprovalPanel(tui, theme, done, {
-            toolName: tool.name,
-            command: tool.command,
-            params: input,
-            allowEdit,
-          }),
-        );
+        const title = [
+          `Approve tool: ${tool.name}`,
+          `Command: ${tool.command}`,
+          "Parameters:",
+          JSON.stringify(input, null, 2),
+        ].join("\n");
+        const options = allowEdit ? ["Run", "Edit", "Reject"] : ["Run", "Reject"];
+        const choice = await ctx.ui.select(title, options);
+        const action: "run" | "edit" | "reject" =
+          choice === "Run" ? "run" : choice === "Edit" && allowEdit ? "edit" : "reject";
 
         if (action === "run") {
           (event as { input: Record<string, unknown> }).input = input;

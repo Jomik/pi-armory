@@ -1,9 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
-import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { saveConfig } from "./config.js";
 import type { CandidateRequest, DraftAuth, DraftInput, DraftOutput } from "./draft.js";
 import { draftToolDefinition, generateCandidateRequests } from "./draft.js";
@@ -118,129 +116,68 @@ export async function gatherProjectEvidence(projectRoot: string): Promise<string
 }
 
 // ---------------------------------------------------------------------------
-// Candidate multi-select TUI panel
+// Candidate multi-select — repeated native select menu
 // ---------------------------------------------------------------------------
 
-function candidateSelectorPanel(
-  tui: TUI,
-  theme: Theme,
-  done: (result: CandidateRequest[] | null) => void,
-  candidates: CandidateRequest[],
-): { invalidate(): void; render(width: number): string[]; handleInput(data: string): void } {
-  let cursor = 0;
-  const selected = new Set<number>();
+const TOGGLE_RE = /^Toggle (\d+)$/;
 
-  return {
-    invalidate() {},
-
-    render(width: number): string[] {
-      const lines: string[] = [];
-      const maxW = Math.min(width, 100);
-      const hr = theme.fg("accent", "─".repeat(maxW));
-
-      lines.push(hr);
-      lines.push(
-        ` ${theme.fg("accent", theme.bold("Armory Onboarding"))}  ${theme.fg("dim", "select tools to draft")}`,
-      );
-      lines.push("");
-
-      for (let i = 0; i < candidates.length; i++) {
-        const c = candidates[i] as CandidateRequest;
-        const isCursor = i === cursor;
-        const isChecked = selected.has(i);
-        const check = isChecked ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
-        const arrow = isCursor ? theme.fg("accent", "❯") : " ";
-        const labelStr = isCursor
-          ? theme.fg("accent", c.label)
-          : isChecked
-            ? theme.fg("text", c.label)
-            : theme.fg("dim", c.label);
-        const cmdStr = theme.fg("muted", c.command);
-        lines.push(truncateToWidth(` ${arrow} ${check}  ${labelStr}  ${cmdStr}`, maxW));
-      }
-
-      // Reasoning for focused candidate
-      if (candidates.length > 0) {
-        const focused = candidates[cursor] as CandidateRequest;
-        lines.push("");
-        const reasoningLines = wrapTextWithAnsi(theme.fg("dim", focused.reasoning), Math.max(maxW - 6, 20));
-        for (const rLine of reasoningLines) {
-          lines.push(`    ${rLine}`);
-        }
-      }
-
-      lines.push("");
-      lines.push(
-        ` ${theme.fg("dim", "↑↓ navigate")}  ${theme.fg("dim", "Space toggle")}  ${theme.fg("dim", "a all")}  ${theme.fg("dim", "n none")}  ${theme.fg("dim", "Enter confirm")}  ${theme.fg("dim", "Esc cancel")}`,
-      );
-      lines.push(hr);
-
-      return lines.map((l) => truncateToWidth(l, width));
-    },
-
-    handleInput(data: string): void {
-      if (matchesKey(data, Key.escape)) {
-        done(null);
-        return;
-      }
-
-      if (matchesKey(data, Key.enter)) {
-        done(
-          Array.from(selected)
-            .sort((a, b) => a - b)
-            .map((i) => candidates[i] as CandidateRequest),
-        );
-        return;
-      }
-
-      if (matchesKey(data, Key.up) || matchesKey(data, "k")) {
-        if (candidates.length > 0) {
-          cursor = (cursor - 1 + candidates.length) % candidates.length;
-          tui.requestRender();
-        }
-        return;
-      }
-
-      if (matchesKey(data, Key.down) || matchesKey(data, "j")) {
-        if (candidates.length > 0) {
-          cursor = (cursor + 1) % candidates.length;
-          tui.requestRender();
-        }
-        return;
-      }
-
-      if (matchesKey(data, Key.space)) {
-        if (selected.has(cursor)) {
-          selected.delete(cursor);
-        } else {
-          selected.add(cursor);
-        }
-        tui.requestRender();
-        return;
-      }
-
-      if (matchesKey(data, "a")) {
-        for (let i = 0; i < candidates.length; i++) selected.add(i);
-        tui.requestRender();
-        return;
-      }
-
-      if (matchesKey(data, "n")) {
-        selected.clear();
-        tui.requestRender();
-        return;
-      }
-    },
-  };
+function candidateSelectorTitle(candidates: CandidateRequest[], selected: Set<number>): string {
+  const lines: string[] = ["Armory Onboarding — select tools to draft", ""];
+  candidates.forEach((c, i) => {
+    const mark = selected.has(i) ? "[x]" : "[ ]";
+    lines.push(`${mark} ${i + 1}. ${c.label}`);
+    lines.push(`    Command: ${c.command}`);
+    lines.push(`    Reasoning: ${c.reasoning}`);
+  });
+  return lines.join("\n");
 }
 
 async function showCandidateSelector(
   ctx: Pick<ExtensionCommandContext, "ui">,
   candidates: CandidateRequest[],
 ): Promise<CandidateRequest[] | null> {
-  return ctx.ui.custom<CandidateRequest[] | null>((tui, theme, _keybindings, done) =>
-    candidateSelectorPanel(tui, theme, done, candidates),
-  );
+  const selected = new Set<number>();
+
+  for (;;) {
+    const options: string[] = candidates.map((_, i) => `Toggle ${i + 1}`);
+    options.push("Select all", "Clear all", "Confirm", "Cancel");
+
+    const choice = await ctx.ui.select(candidateSelectorTitle(candidates, selected), options);
+
+    if (choice === "Select all") {
+      for (let i = 0; i < candidates.length; i++) selected.add(i);
+      continue;
+    }
+
+    if (choice === "Clear all") {
+      selected.clear();
+      continue;
+    }
+
+    if (choice === "Confirm") {
+      return candidates.filter((_, i) => selected.has(i));
+    }
+
+    if (choice === "Cancel") {
+      return null;
+    }
+
+    const match = choice !== undefined ? TOGGLE_RE.exec(choice) : null;
+    if (match?.[1]) {
+      const index = Number(match[1]) - 1;
+      if (index >= 0 && index < candidates.length) {
+        if (selected.has(index)) {
+          selected.delete(index);
+        } else {
+          selected.add(index);
+        }
+      }
+      continue;
+    }
+
+    // Menu cancellation (choice === undefined) or an unexpected response fails closed.
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

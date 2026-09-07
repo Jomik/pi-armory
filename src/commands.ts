@@ -1,19 +1,10 @@
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import {
-  Container,
-  Key,
-  matchesKey,
-  type SelectItem,
-  SelectList,
-  Text,
-  type TUI,
-  truncateToWidth,
-} from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool, ToolSource } from "./config.js";
 import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "./keychain.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
-import { SecretsPanel } from "./secrets-panel.js";
+import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
 import { buildToolFromResult, showToolEditor } from "./shared.js";
 
 export interface ArmoryCommandDeps {
@@ -100,9 +91,6 @@ function allEditableTools(deps: ArmoryCommandDeps): ArmoryTool[] {
 }
 
 type EditableToolEntry = { tool: ArmoryTool; source: ToolSource };
-type ToolPickerScope = ToolSource | "all";
-
-const TOOL_PICKER_SCOPES: ToolPickerScope[] = ["all", "session", "project", "global"];
 
 async function allEditableToolEntries(projectRoot: string): Promise<EditableToolEntry[]> {
   const combined = new Map<string, EditableToolEntry>();
@@ -175,154 +163,85 @@ function scopeChangeMessage(name: string, from: ToolSource, to: ToolSource): str
   if (from === "global" && to === "project") {
     return (
       `Move '${name}' from global config to project config (.pi/armory.json)?\n` +
-      `It will only be available in this project and will override the global version.`
+      `It will be removed from global config, so other projects will no longer have it — it will only be available in this project.`
     );
   }
   return `Change destination for '${name}' from ${from} to ${to}?`;
 }
 
+function secretStatusTitle(accounts: string[], found: Set<string>): string {
+  const lines: string[] = ["Armory Secrets", ""];
+  for (const account of accounts) {
+    const status = found.has(account) ? "✓ found" : "✗ missing";
+    lines.push(`${account} — ${status}`);
+  }
+  return lines.join("\n");
+}
+
+async function handleSetSecret(ctx: Ctx, account: string): Promise<void> {
+  let value: string | null;
+  try {
+    value = await promptHiddenAnswer(account);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(msg, "error");
+    return;
+  }
+  if (value === null) return; // user cancelled
+  const trimmed = value.trim();
+  if (!trimmed) return; // empty/whitespace value is not saved
+
+  try {
+    await addSecret(account, trimmed);
+    ctx.ui.notify(`Secret '${account}' saved.`, "info");
+  } catch {
+    ctx.ui.notify(`Failed to save secret '${account}'.`, "error");
+  }
+}
+
+async function handleDeleteSecret(ctx: Ctx, account: string): Promise<void> {
+  const choice = await ctx.ui.select(`Delete '${account}'?`, ["Delete", "Cancel"]);
+  if (choice !== "Delete") return;
+
+  try {
+    await removeSecret(account);
+    ctx.ui.notify(`Secret '${account}' deleted.`, "info");
+  } catch {
+    ctx.ui.notify(`Failed to delete secret '${account}'.`, "error");
+  }
+}
+
 async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
   const accounts = getAccounts(tools);
-  await ctx.ui.custom<null>(
-    (tui, theme, _keybindings, done) =>
-      new SecretsPanel({
-        tui,
-        theme,
-        done,
-        notify: (msg, type) => ctx.ui.notify(msg, type),
-        accounts,
-      }),
-  );
-}
-
-function scopeLabel(scope: ToolPickerScope): string {
-  return scope.charAt(0).toUpperCase() + scope.slice(1);
-}
-
-function sourceDescription(entry: EditableToolEntry): string {
-  const parts = [`[${entry.source}]`, entry.tool.description];
-  if (entry.tool.command) parts.push(`— ${entry.tool.command}`);
-  return parts.join(" ");
-}
-
-function pickerItems(entries: EditableToolEntry[], scope: ToolPickerScope): SelectItem[] {
-  return entries
-    .filter((entry) => scope === "all" || entry.source === scope)
-    .map((entry) => ({
-      value: entry.tool.name,
-      label: entry.tool.name,
-      description: sourceDescription(entry),
-    }));
-}
-
-function createToolPicker(
-  tui: TUI,
-  theme: Theme,
-  title: string,
-  entries: EditableToolEntry[],
-  done: (toolName: string | null) => void,
-) {
-  let scopeIndex = 0;
-  let filter = "";
-  let selectList = buildSelectList();
-
-  const container = new Container();
-
-  function currentScope(): ToolPickerScope {
-    return TOOL_PICKER_SCOPES[scopeIndex] ?? "all";
+  if (accounts.length === 0) {
+    ctx.ui.notify("No secrets configured", "info");
+    return;
   }
 
-  function buildSelectList(): SelectList {
-    const items = pickerItems(entries, currentScope());
-    const list = new SelectList(items, Math.min(items.length, 14), {
-      selectedPrefix: (text: string) => theme.fg("accent", text),
-      selectedText: (text: string) => theme.fg("accent", text),
-      description: (text: string) => theme.fg("muted", text),
-      scrollInfo: (text: string) => theme.fg("dim", text),
-      noMatch: (text: string) => theme.fg("warning", text),
-    });
-    list.setFilter(filter);
-    list.onSelect = (item) => done(item.value);
-    list.onCancel = () => done(null);
-    return list;
+  for (;;) {
+    const { found } = await listSecrets(accounts);
+    const foundSet = new Set(found);
+    const choice = await ctx.ui.select(secretStatusTitle(accounts, foundSet), [...accounts, "Close"]);
+    if (choice === "Close") return;
+    // Fail closed on any response that isn't a configured account: never proceed to the
+    // next prompt or a keychain operation on an unexpected/malformed answer.
+    if (!choice || !accounts.includes(choice)) return;
+
+    const account = choice;
+    const isFound = foundSet.has(account);
+    const options = isFound ? ["Set/update", "Delete", "Back"] : ["Set/update", "Back"];
+    const action = await ctx.ui.select(`${account} — ${isFound ? "found" : "missing"}`, options);
+    // Fail closed unless the response is exactly one of the options actually offered.
+    // In particular, "Delete" must never execute when it wasn't offered (missing account).
+    if (!action || !options.includes(action)) return;
+    if (action === "Back") continue;
+
+    if (action === "Set/update") {
+      await handleSetSecret(ctx, account);
+    } else if (action === "Delete") {
+      await handleDeleteSecret(ctx, account);
+    }
   }
-
-  function rebuildList(): void {
-    selectList = buildSelectList();
-    container.invalidate();
-  }
-
-  function renderScopes(width: number): string {
-    const scopeText = TOOL_PICKER_SCOPES.map((scope, i) => {
-      const text = scopeLabel(scope);
-      return i === scopeIndex ? theme.fg("accent", theme.bold(text)) : theme.fg("muted", text);
-    }).join(theme.fg("dim", " | "));
-    return truncateToWidth(` ${scopeText}`, width);
-  }
-
-  return {
-    invalidate() {
-      container.invalidate();
-      selectList.invalidate();
-    },
-
-    render(width: number): string[] {
-      container.clear();
-      const maxW = Math.min(width, 110);
-      const hr = theme.fg("accent", "─".repeat(maxW));
-      container.addChild(new Text(hr, 0, 0));
-      container.addChild(new Text(` ${theme.fg("accent", theme.bold(title))}`, 0, 0));
-      container.addChild(new Text(renderScopes(maxW), 0, 0));
-      container.addChild(
-        new Text(` ${theme.fg("dim", filter ? `Filter: ${filter}` : "Type to filter by name")}`, 0, 0),
-      );
-      container.addChild(selectList);
-      container.addChild(
-        new Text(
-          theme.fg("dim", " ↑↓ navigate • tab scope • type filter • backspace clear • enter select • esc cancel"),
-          0,
-          0,
-        ),
-      );
-      container.addChild(new Text(hr, 0, 0));
-      return container.render(width).map((line) => truncateToWidth(line, width));
-    },
-
-    handleInput(data: string) {
-      if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
-        scopeIndex = (scopeIndex + 1) % TOOL_PICKER_SCOPES.length;
-        rebuildList();
-        tui.requestRender();
-        return;
-      }
-      if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
-        scopeIndex = (scopeIndex + TOOL_PICKER_SCOPES.length - 1) % TOOL_PICKER_SCOPES.length;
-        rebuildList();
-        tui.requestRender();
-        return;
-      }
-      if (matchesKey(data, Key.backspace) && filter.length > 0) {
-        filter = filter.slice(0, -1);
-        rebuildList();
-        tui.requestRender();
-        return;
-      }
-      if (matchesKey(data, Key.escape) && filter.length > 0) {
-        filter = "";
-        rebuildList();
-        tui.requestRender();
-        return;
-      }
-      if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) !== 127) {
-        filter += data;
-        rebuildList();
-        tui.requestRender();
-        return;
-      }
-      selectList.handleInput(data);
-      tui.requestRender();
-    },
-  };
 }
 
 async function pickEditableTool(
@@ -330,11 +249,6 @@ async function pickEditableTool(
   title: string,
   entries: EditableToolEntry[],
 ): Promise<string | null> {
-  const picked = await ctx.ui.custom<string | null | undefined>((tui, theme, _keybindings, done) =>
-    createToolPicker(tui, theme, title, entries, done),
-  );
-  if (picked !== undefined) return picked;
-
   const selected = await ctx.ui.select(
     title,
     entries.map((entry) => entry.tool.name),
@@ -386,6 +300,23 @@ async function handleEdit(
 
   if ("rejected" in result) return; // user rejected
 
+  // Normalize and validate the edited name exactly like request_tool/onboarding, before any
+  // persistence or registry mutation.
+  const name = normalizeName(result.name);
+
+  if (!name || !VALID_NAME.test(name)) {
+    ctx.ui.notify(
+      `Could not derive a valid tool name from '${result.name}'. Must contain at least one letter.`,
+      "error",
+    );
+    return;
+  }
+
+  if (RESERVED_NAMES.has(name)) {
+    ctx.ui.notify(`Cannot register tool with reserved name '${name}'.`, "error");
+    return;
+  }
+
   // Confirm if scope/destination is being changed
   if (result.destination !== source) {
     const msg = scopeChangeMessage(tool.name, source, result.destination);
@@ -393,7 +324,7 @@ async function handleEdit(
     if (choice !== "Confirm") return; // user aborted — no changes applied
   }
 
-  const updatedTool = buildToolFromResult(result, { env: tool.env, secrets: tool.secrets });
+  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, secrets: tool.secrets });
   const sourceName = tool.name;
   const destName = updatedTool.name;
 

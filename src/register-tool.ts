@@ -184,7 +184,7 @@ async function resolveToolEnvironment(
 
 /**
  * Validates params against a schema, returning either the validated value or a
- * human-readable error message. Shared by tool execution and approval-panel edits
+ * human-readable error message. Shared by tool execution and approval-menu edits
  * so both paths enforce identical rules and produce identical error text.
  */
 export function validateToolParams(

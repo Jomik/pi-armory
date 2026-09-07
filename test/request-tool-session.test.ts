@@ -42,14 +42,10 @@ describe("request_tool session destination", () => {
       modelRegistry: {},
       model: undefined,
       ui: {
-        custom: vi.fn().mockResolvedValue({
-          name: "run_tests",
-          command: "npm test",
-          description: "Run tests",
-          guidelines: [],
-          requiresApproval: false,
-          destination: "session",
-        }),
+        select: vi.fn().mockResolvedValueOnce("Edit name").mockResolvedValueOnce("Save"),
+        input: vi.fn().mockResolvedValueOnce("run_tests"),
+        editor: vi.fn(),
+        notify: vi.fn(),
       },
     };
 
@@ -93,14 +89,15 @@ describe("request_tool session destination", () => {
       modelRegistry: {},
       model: undefined,
       ui: {
-        custom: vi.fn().mockResolvedValue({
-          name: "run_tests",
-          command: "npm test",
-          description: "Run tests",
-          guidelines: [],
-          requiresApproval: false,
-          destination: "project",
-        }),
+        select: vi
+          .fn()
+          .mockResolvedValueOnce("Edit name")
+          .mockResolvedValueOnce("Set destination")
+          .mockResolvedValueOnce("project")
+          .mockResolvedValueOnce("Save"),
+        input: vi.fn().mockResolvedValueOnce("run_tests"),
+        editor: vi.fn(),
+        notify: vi.fn(),
       },
     };
 
@@ -134,14 +131,10 @@ describe("request_tool session destination", () => {
       modelRegistry: {},
       model: undefined,
       ui: {
-        custom: vi.fn().mockResolvedValue({
-          name: "run_tests",
-          command: "npm test",
-          description: "Run tests",
-          guidelines: [],
-          requiresApproval: false,
-          destination: "session",
-        }),
+        select: vi.fn().mockResolvedValueOnce("Edit name").mockResolvedValueOnce("Save"),
+        input: vi.fn().mockResolvedValueOnce("run_tests"),
+        editor: vi.fn(),
+        notify: vi.fn(),
       },
     };
 
@@ -176,7 +169,10 @@ describe("request_tool session destination", () => {
       modelRegistry: {},
       model: undefined,
       ui: {
-        custom: vi.fn().mockRejectedValue(new Error("form closed")),
+        select: vi.fn().mockRejectedValue(new Error("form closed")),
+        input: vi.fn(),
+        editor: vi.fn(),
+        notify: vi.fn(),
       },
     };
 
@@ -251,15 +247,11 @@ describe("request_tool enterprise baseUrl routing", () => {
       },
       model: sessionModel,
       ui: {
-        // Return a valid form result so the execute() path completes normally.
-        custom: vi.fn().mockResolvedValue({
-          name: "run_tests",
-          command: "npm test",
-          description: "Runs the test suite",
-          guidelines: [],
-          requiresApproval: false,
-          destination: "session",
-        }),
+        // The drafted values already match the expected result, so Save immediately.
+        select: vi.fn().mockResolvedValue("Save"),
+        input: vi.fn(),
+        editor: vi.fn(),
+        notify: vi.fn(),
       },
     };
 
@@ -277,7 +269,7 @@ describe("request_tool enterprise baseUrl routing", () => {
 });
 
 describe("request_tool draft stream terminal error propagation", () => {
-  it("rejects with the stream errorMessage and does not open ctx.ui.custom", async () => {
+  it("rejects with the stream errorMessage and does not open the tool review menu", async () => {
     const mockStreamSimple = vi.mocked(streamSimple);
 
     // biome-ignore lint/suspicious/noExplicitAny: test async-generator mock
@@ -323,14 +315,14 @@ describe("request_tool draft stream terminal error propagation", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: minimal fake model
     const fakeModel: any = { id: "test", name: "test-model" };
-    const customMock = vi.fn();
+    const selectMock = vi.fn();
     const ctx = {
       hasUI: true,
       modelRegistry: {
         getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: "test-key" }),
       },
       model: fakeModel,
-      ui: { custom: customMock },
+      ui: { select: selectMock, input: vi.fn(), editor: vi.fn(), notify: vi.fn() },
     };
 
     await expect(
@@ -343,6 +335,6 @@ describe("request_tool draft stream terminal error propagation", () => {
       ),
     ).rejects.toThrow("draft unavailable");
 
-    expect(customMock).not.toHaveBeenCalled();
+    expect(selectMock).not.toHaveBeenCalled();
   });
 });

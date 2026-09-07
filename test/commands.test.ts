@@ -31,8 +31,16 @@ vi.mock("../src/onboard.js", () => ({
   handleOnboard: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../src/keychain.js", () => ({
+  addSecret: vi.fn(),
+  listSecrets: vi.fn(),
+  promptHiddenAnswer: vi.fn(),
+  removeSecret: vi.fn(),
+}));
+
 import { type ArmoryCommandDeps, registerArmoryCommand } from "../src/commands.js";
 import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
+import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "../src/keychain.js";
 import { handleOnboard } from "../src/onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
 import { buildToolFromResult, showToolEditor } from "../src/shared.js";
@@ -69,13 +77,12 @@ function makeDeps(overrides: Partial<ArmoryCommandDeps> = {}): ArmoryCommandDeps
   };
 }
 
-function makeCtx(overrides: { selectResponses?: (string | null)[]; customResponse?: unknown } = {}) {
+function makeCtx(overrides: { selectResponses?: (string | null)[] } = {}) {
   const selectQueue = [...(overrides.selectResponses ?? [])];
   return {
     ui: {
       notify: vi.fn(),
       select: vi.fn(async () => selectQueue.shift() ?? null),
-      custom: vi.fn().mockResolvedValue(overrides.customResponse ?? null),
     },
     modelRegistry: {},
     model: undefined,
@@ -85,13 +92,6 @@ function makeCtx(overrides: { selectResponses?: (string | null)[]; customRespons
 function getHandler(pi: ReturnType<typeof makePi>): (args: string, ctx: unknown) => Promise<void> {
   const call = (pi.registerCommand as ReturnType<typeof vi.fn>).mock.calls[0];
   return call[1].handler;
-}
-
-function plainTheme() {
-  return {
-    fg: (_color: string, text: string) => text,
-    bold: (text: string) => text,
-  };
 }
 
 describe("handleEdit", () => {
@@ -368,7 +368,8 @@ describe("handleEdit", () => {
     await handler("edit global_tool", ctx as never);
 
     const [confirmMsg] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(confirmMsg).toContain("only be available in this project");
+    expect(confirmMsg).toContain("removed from global config");
+    expect(confirmMsg).toContain("other projects will no longer have it");
     expect(saveConfig).toHaveBeenCalledWith(toolGlobal, "project", "/project");
     expect(removeFromConfig).toHaveBeenCalledWith("global_tool", "global", "/project");
   });
@@ -399,7 +400,85 @@ describe("handleEdit", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });
 
-  it("uses the custom scrollable picker when editing without a tool name", async () => {
+  it("aborts without changes when the edited name is invalid/empty", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "   ",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("session_tool")).toEqual(toolSession);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("valid tool name"), "error");
+  });
+
+  it("aborts without changes when the edited name is reserved", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "request_tool",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("session_tool")).toEqual(toolSession);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reserved name"), "error");
+  });
+
+  it("normalizes a valid human name before building/saving/registering", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    const updatedTool = { name: "my_new_tool", command: "echo updated", description: "updated" };
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "My New Tool!",
+      command: "echo updated",
+      description: "updated",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "session",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue(updatedTool);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit session_tool", ctx as never);
+
+    expect(buildToolFromResult).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "my_new_tool" }),
+      expect.anything(),
+    );
+    expect(sessionRegistry.get("my_new_tool")).toEqual(updatedTool);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, updatedTool);
+  });
+
+  it("uses ui.select when editing without a tool name", async () => {
     vi.mocked(loadToolsWithSource).mockResolvedValue([{ tool: toolProject, source: "project" }]);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
     const updatedTool = { name: "run_tests", command: "npm test --watch", description: "Run tests" };
@@ -415,14 +494,16 @@ describe("handleEdit", () => {
 
     const pi = makePi();
     const deps = makeDeps();
-    const ctx = makeCtx({ customResponse: "run_tests" });
+    const ctx = makeCtx({ selectResponses: ["run_tests"] });
     registerArmoryCommand(pi as never, deps);
     const handler = getHandler(pi);
     await handler("edit", ctx as never);
 
     expect(loadToolsWithSource).toHaveBeenCalledWith("/project");
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
-    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    const [pickerPrompt, pickerNames] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(pickerPrompt).toContain("edit");
+    expect(pickerNames).toEqual(["run_tests"]);
     expect(showToolEditor).toHaveBeenCalledWith(
       ctx,
       expect.objectContaining({ name: "run_tests", destination: "project" }),
@@ -541,82 +622,23 @@ describe("handleDelete", () => {
     expect(approvalRegistry.has("session_tool")).toBe(false);
   });
 
-  it("shows the custom scrollable picker when no name given", async () => {
-    sessionRegistry.set("session_tool", toolSession);
-    vi.mocked(loadToolsWithSource).mockResolvedValue([]);
-
-    const pi = makePi();
-    const deps = makeDeps({ tools: [] });
-    const ctx = makeCtx({ customResponse: "session_tool", selectResponses: ["Cancel"] });
-    registerArmoryCommand(pi as never, deps);
-    const handler = getHandler(pi);
-    await handler("delete", ctx as never);
-
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
-    expect(ctx.ui.select).toHaveBeenCalledOnce();
-    const [confirmPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(confirmPrompt).toContain("session_tool");
-  });
-
-  it("falls back to ui.select when custom UI is unavailable", async () => {
+  it("uses ui.select when no name given", async () => {
     sessionRegistry.set("session_tool", toolSession);
     vi.mocked(loadToolsWithSource).mockResolvedValue([]);
 
     const pi = makePi();
     const deps = makeDeps({ tools: [] });
     const ctx = makeCtx({ selectResponses: ["session_tool", "Cancel"] });
-    ctx.ui.custom = vi.fn().mockResolvedValue(undefined);
     registerArmoryCommand(pi as never, deps);
     const handler = getHandler(pi);
     await handler("delete", ctx as never);
 
-    expect(ctx.ui.custom).toHaveBeenCalledOnce();
     expect(ctx.ui.select).toHaveBeenCalledTimes(2);
-    const [pickerPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [pickerPrompt, pickerNames] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(pickerPrompt).toContain("delete");
-  });
-
-  it("picker renders source labels and supports tabbing to session scope", async () => {
-    sessionRegistry.set("session_tool", toolSession);
-    vi.mocked(loadToolsWithSource).mockResolvedValue([
-      { tool: toolProject, source: "project" },
-      { tool: toolGlobal, source: "global" },
-    ]);
-
-    const rendered: string[] = [];
-    const ctx = makeCtx();
-    ctx.ui.custom = vi.fn(async (factory: unknown) => {
-      const component = (
-        factory as (
-          tui: unknown,
-          theme: unknown,
-          keybindings: unknown,
-          done: (value: string | null) => void,
-        ) => {
-          render(width: number): string[];
-          handleInput(data: string): void;
-        }
-      )({ requestRender: vi.fn() }, plainTheme(), undefined, vi.fn());
-
-      rendered.push(component.render(120).join("\n"));
-      component.handleInput("\t");
-      rendered.push(component.render(120).join("\n"));
-      return null;
-    });
-
-    const pi = makePi();
-    const deps = makeDeps({ tools: [] });
-    registerArmoryCommand(pi as never, deps);
-    const handler = getHandler(pi);
-    await handler("delete", ctx as never);
-
-    expect(rendered[0]).toContain("[session]");
-    expect(rendered[0]).toContain("[project]");
-    expect(rendered[0]).toContain("[global]");
-    expect(rendered[1]).toContain("Session");
-    expect(rendered[1]).toContain("[session]");
-    expect(rendered[1]).not.toContain("[project]");
-    expect(rendered[1]).not.toContain("[global]");
+    expect(pickerNames).toEqual(["session_tool"]);
+    const [confirmPrompt] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(confirmPrompt).toContain("session_tool");
   });
 });
 
@@ -668,6 +690,250 @@ describe("command completions", () => {
     const completions = getArgumentCompletions("");
     const values = completions?.map((c: { value: string }) => c.value) ?? [];
     expect(values).toContain("onboard");
+  });
+});
+
+describe("handleSecrets", () => {
+  const toolWithSecret: ArmoryTool = {
+    name: "svc_tool",
+    command: "echo secret",
+    description: "uses secret",
+    secrets: { API_KEY: "my_account" },
+  };
+
+  beforeEach(() => {
+    vi.mocked(listSecrets).mockReset();
+    vi.mocked(addSecret).mockReset();
+    vi.mocked(removeSecret).mockReset();
+    vi.mocked(promptHiddenAnswer).mockReset();
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("notifies and returns when no accounts are configured", async () => {
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("No secrets configured", "info");
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(listSecrets).not.toHaveBeenCalled();
+  });
+
+  it("shows status and closes on Close", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(listSecrets).toHaveBeenCalledWith(["my_account"]);
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    const [title, options] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(title).toContain("my_account");
+    expect(title).toContain("found");
+    expect(options).toEqual(["my_account", "Close"]);
+  });
+
+  it("selecting an account then Back returns to the status list", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Back", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(listSecrets).toHaveBeenCalledTimes(2);
+    expect(ctx.ui.select).toHaveBeenCalledTimes(3);
+    // Missing account should not offer Delete
+    const [, actionOptions] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(actionOptions).toEqual(["Set/update", "Back"]);
+  });
+
+  it("Set/update prompts for a hidden answer, saves via addSecret, and notifies", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+    vi.mocked(promptHiddenAnswer).mockResolvedValue("super-secret-value");
+    vi.mocked(addSecret).mockResolvedValue(undefined);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Set/update", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(promptHiddenAnswer).toHaveBeenCalledWith("my_account");
+    expect(addSecret).toHaveBeenCalledWith("my_account", "super-secret-value");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Secret 'my_account' saved.", "info");
+
+    // The secret value must never reach any ui.select or ui.notify call.
+    for (const call of (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(JSON.stringify(call)).not.toContain("super-secret-value");
+    }
+    for (const call of (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(JSON.stringify(call)).not.toContain("super-secret-value");
+    }
+  });
+
+  it("Set/update does nothing when the prompt is cancelled", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+    vi.mocked(promptHiddenAnswer).mockResolvedValue(null);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Set/update", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(addSecret).not.toHaveBeenCalled();
+  });
+
+  it("Set/update does not save an empty/whitespace value", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+    vi.mocked(promptHiddenAnswer).mockResolvedValue("   ");
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Set/update", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(addSecret).not.toHaveBeenCalled();
+  });
+
+  it("notifies generically without the secret value when addSecret fails", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+    vi.mocked(promptHiddenAnswer).mockResolvedValue("super-secret-value");
+    vi.mocked(addSecret).mockRejectedValue(new Error("pi-armory: failed to add secret 'my_account': boom"));
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Set/update", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Failed to save secret 'my_account'.", "error");
+    for (const call of (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(JSON.stringify(call)).not.toContain("super-secret-value");
+    }
+  });
+
+  it("notifies a descriptive error when the prompt itself fails", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+    vi.mocked(promptHiddenAnswer).mockRejectedValue(new Error("pi-armory: failed to prompt for secret value: boom"));
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Set/update", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(addSecret).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("failed to prompt"), "error");
+  });
+
+  it("Delete confirmed removes the secret and notifies", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+    vi.mocked(removeSecret).mockResolvedValue(undefined);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Delete", "Delete", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(removeSecret).toHaveBeenCalledWith("my_account");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Secret 'my_account' deleted.", "info");
+  });
+
+  it("Delete cancelled makes no change", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Delete", "Cancel", "Close"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(removeSecret).not.toHaveBeenCalled();
+  });
+
+  it("unknown/undefined status response fails closed (treated as Close)", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: [null] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+  });
+
+  it("malformed/unconfigured account response fails closed with no further prompt or keychain op", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["not_a_real_account"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    // Only the top-level select happened; no follow-up prompt or keychain mutation.
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
+    expect(removeSecret).not.toHaveBeenCalled();
+  });
+
+  it("malformed action response fails closed with no prompt/add/remove", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: ["my_account"], missing: [] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    const ctx = makeCtx({ selectResponses: ["my_account", "Nuke everything"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    expect(ctx.ui.select).toHaveBeenCalledTimes(2);
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
+    expect(removeSecret).not.toHaveBeenCalled();
+  });
+
+  it("Delete action not offered for a missing account fails closed and does not remove", async () => {
+    vi.mocked(listSecrets).mockResolvedValue({ found: [], missing: ["my_account"] });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolWithSecret] });
+    // Attacker/response supplies "Delete" even though it wasn't offered (missing account only offers Set/update, Back).
+    const ctx = makeCtx({ selectResponses: ["my_account", "Delete"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("secrets", ctx as never);
+
+    const [, actionOptions] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[1];
+    expect(actionOptions).not.toContain("Delete");
+    expect(removeSecret).not.toHaveBeenCalled();
+    expect(promptHiddenAnswer).not.toHaveBeenCalled();
+    expect(addSecret).not.toHaveBeenCalled();
   });
 });
 
