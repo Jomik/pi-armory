@@ -72,3 +72,29 @@ export async function removeSecret(account: string): Promise<void> {
     throw new Error(`pi-armory: failed to remove secret '${account}': ${msg}`);
   }
 }
+
+const HIDDEN_ANSWER_SCRIPT = `on run argv
+  set acctName to item 1 of argv
+  display dialog "Enter secret value for " & acctName default answer "" with hidden answer
+  return text returned of result
+end run`;
+
+/**
+ * Prompts for a secret value using a native macOS "osascript" hidden-answer dialog.
+ * The account name is passed as a separate argv value (never interpolated into the
+ * script source) so it cannot be used to inject AppleScript.
+ * @param account - The keychain account name to display in the prompt
+ * @returns The entered value, or null if the user cancelled the dialog
+ */
+export async function promptHiddenAnswer(account: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFile("osascript", ["-e", HIDDEN_ANSWER_SCRIPT, account]);
+    return stdout.replace(/\n$/, "");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("-128") || msg.includes("User canceled")) {
+      return null;
+    }
+    throw new Error(`pi-armory: failed to prompt for secret value: ${msg}`);
+  }
+}

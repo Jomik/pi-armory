@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addSecret, fetchSecret, listSecrets, removeSecret } from "../src/keychain.js";
+import { addSecret, fetchSecret, listSecrets, promptHiddenAnswer, removeSecret } from "../src/keychain.js";
 
 const mockExecFile = vi.hoisted(() => vi.fn());
 

@@ -1,9 +1,9 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool, ToolSource } from "./config.js";
 import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "./keychain.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
-import { SecretsPanel } from "./secrets-panel.js";
 import { buildToolFromResult, showToolEditor } from "./shared.js";
 
 export interface ArmoryCommandDeps {
@@ -168,18 +168,73 @@ function scopeChangeMessage(name: string, from: ToolSource, to: ToolSource): str
   return `Change destination for '${name}' from ${from} to ${to}?`;
 }
 
+function secretStatusTitle(accounts: string[], found: Set<string>): string {
+  const lines: string[] = ["Armory Secrets", ""];
+  for (const account of accounts) {
+    const status = found.has(account) ? "✓ found" : "✗ missing";
+    lines.push(`${account} — ${status}`);
+  }
+  return lines.join("\n");
+}
+
+async function handleSetSecret(ctx: Ctx, account: string): Promise<void> {
+  let value: string | null;
+  try {
+    value = await promptHiddenAnswer(account);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(msg, "error");
+    return;
+  }
+  if (value === null) return; // user cancelled
+  const trimmed = value.trim();
+  if (!trimmed) return; // empty/whitespace value is not saved
+
+  try {
+    await addSecret(account, trimmed);
+    ctx.ui.notify(`Secret '${account}' saved.`, "info");
+  } catch {
+    ctx.ui.notify(`Failed to save secret '${account}'.`, "error");
+  }
+}
+
+async function handleDeleteSecret(ctx: Ctx, account: string): Promise<void> {
+  const choice = await ctx.ui.select(`Delete '${account}'?`, ["Delete", "Cancel"]);
+  if (choice !== "Delete") return;
+
+  try {
+    await removeSecret(account);
+    ctx.ui.notify(`Secret '${account}' deleted.`, "info");
+  } catch {
+    ctx.ui.notify(`Failed to delete secret '${account}'.`, "error");
+  }
+}
+
 async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
   const accounts = getAccounts(tools);
-  await ctx.ui.custom<null>(
-    (tui, theme, _keybindings, done) =>
-      new SecretsPanel({
-        tui,
-        theme,
-        done,
-        notify: (msg, type) => ctx.ui.notify(msg, type),
-        accounts,
-      }),
-  );
+  if (accounts.length === 0) {
+    ctx.ui.notify("No secrets configured", "info");
+    return;
+  }
+
+  for (;;) {
+    const { found } = await listSecrets(accounts);
+    const foundSet = new Set(found);
+    const choice = await ctx.ui.select(secretStatusTitle(accounts, foundSet), [...accounts, "Close"]);
+    if (!choice || choice === "Close") return;
+
+    const account = choice;
+    const isFound = foundSet.has(account);
+    const options = isFound ? ["Set/update", "Delete", "Back"] : ["Set/update", "Back"];
+    const action = await ctx.ui.select(`${account} — ${isFound ? "found" : "missing"}`, options);
+    if (!action || action === "Back") continue;
+
+    if (action === "Set/update") {
+      await handleSetSecret(ctx, account);
+    } else if (action === "Delete") {
+      await handleDeleteSecret(ctx, account);
+    }
+  }
 }
 
 async function pickEditableTool(
