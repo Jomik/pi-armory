@@ -79,7 +79,7 @@ Values are shell-escaped before substitution. No separate `parameters` config fi
 
 ### Bootstrapping
 
-Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via a native review flow — a repeated select menu (with input/editor dialogs for individual fields) — that works identically in the TUI and in RPC clients such as Paseo:
+Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via a native review flow — a repeated select menu (with input/editor dialogs for individual fields) — that works identically in the TUI and in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.
 
 ```
 Agent calls: request_tool({
@@ -100,7 +100,7 @@ When no draft model is configured, or when the draft does not choose a destinati
 
 If the draft model determines it lacks sufficient context (e.g., command references a script whose contents weren't provided), it rejects the request with a reason. The agent receives the rejection message and can retry with additional context.
 
-Tool names are automatically normalized to lowercase with underscores (e.g., "Run Tests" → `run_tests`).
+Tool names are automatically normalized: lowercased, spaces/dashes collapsed to underscores, and any character that isn't a lowercase letter, digit, or underscore is stripped. The normalized name must start with a letter (leading digits/underscores are stripped). `request_tool` is a reserved name and cannot be used for a registered tool.
 
 ### Approval gate
 
@@ -137,6 +137,8 @@ Values support three forms:
 
 > **⚠️ `env` values are visible in tool output shown to the LLM.** Do not put secrets here. Use the `secrets` field for sensitive values - those are stored in the macOS Keychain and redacted from all output.
 
+Secrets and `/armory secrets` are macOS-only: storage uses the macOS Keychain (`security`) and the set/update prompt uses a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop session able to display dialogs). There is no cross-platform fallback; on other platforms or headless/non-GUI sessions, secrets management is unavailable.
+
 When both `env` and `secrets` define the same key, secrets take precedence and the env entry is skipped.
 
 #### Managing secrets
@@ -145,7 +147,7 @@ When both `env` and `secrets` define the same key, secrets take precedence and t
 
 1. An account list menu shows each configured secret account and whether it's currently found in the Keychain.
 2. Selecting an account opens a status/action menu (`Set/update`, `Delete` if present, `Back`).
-3. **Set/update** collects the value via a local macOS `osascript` hidden-answer dialog (a native system dialog, not a Pi dialog) - the value is never shown in or transmitted through the Pi/Paseo UI or transcript, only the resulting save/failure notification is.
+3. **Set/update** collects the value via a local macOS `osascript` hidden-answer dialog (a native system dialog, not a Pi dialog) - the value never traverses the Pi/Paseo UI or transcript, only the resulting save/failure notification is. However, the value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may be visible to local process inspection (e.g. `ps`) for the brief duration of that call.
 4. **Delete** requires a native confirm/cancel selection before removing the entry.
 
 Storage (macOS Keychain, service `pi-armory`) and output redaction are unchanged by the UI used to manage entries.
@@ -158,7 +160,7 @@ Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit 
 
 ### Editing tools
 
-`/armory edit [name]` opens the TUI form for an existing tool. If no name is given, a picker lists all tools (session + project + global). You can edit any field and optionally re-draft with AI.
+`/armory edit [name]` opens the native review-menu/dialog flow for an existing tool (the same select/input/editor primitives used by `request_tool`). If no name is given, a picker lists all tools (session + project + global). You can edit any field and optionally re-draft with AI.
 
 If you change the **Destination** field, a confirmation is shown before the change is applied:
 
@@ -168,7 +170,7 @@ If you change the **Destination** field, a confirmation is shown before the chan
 | Session → Global | Saved to `~/.pi/agent/armory.json`; removed from in-memory registry |
 | Project/Global → Session | **Removed** from the config file; only available for the rest of this session |
 | Project → Global | Moved to global config; available in all projects |
-| Global → Project | Moved to project config; overrides global in this project only |
+| Global → Project | Saved to project config and removed from global config; other projects lose access to it |
 
 Cancelling the confirmation aborts the edit — no config or registry is modified.
 
@@ -184,7 +186,7 @@ All deletions require confirmation. Deleting a tool deactivates that name for th
 
 ### Onboarding
 
-`/armory onboard` asks the configured draft model what common development operations this project needs tools for, then lets you pick which to draft:
+`/armory onboard` asks a draft model what common development operations this project needs tools for, then lets you pick which to draft. It requires either a configured `draftModel` (in `.pi/armory.json` or `~/.pi/agent/armory.json`) or an active session model; if neither is available, onboarding reports an error and does not proceed.
 
 1. A native select menu lists proposed candidates as a repeated toggle loop - toggle individual candidates on/off, or `Select all`/`Clear all`, then `Confirm` or `Cancel`.
 2. Each selected candidate goes through the same draft/review flow as `request_tool` (native review menu, edit fields, choose destination, approve/reject).

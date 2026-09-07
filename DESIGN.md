@@ -56,7 +56,7 @@ The registry is never persisted. Resolution order for edit/delete is: session > 
 
 ## Project onboarding (`/armory onboard`)
 
-Onboarding is a human-initiated batch wrapper around the existing tool drafting and review flow. It helps bootstrap a project by asking the draft model what common development operations an agent should have tools for, then lets the user choose which proposed requests should become actual armory tools.
+Onboarding is a human-initiated batch wrapper around the existing tool drafting and review flow. It requires either a configured `draftModel` (project or global config) or an active session model; otherwise it reports an error and does not proceed. It helps bootstrap a project by asking the draft model what common development operations an agent should have tools for, then lets the user choose which proposed requests should become actual armory tools.
 
 The onboarding flow deliberately proposes **candidate tool requests**, not final tools. A candidate request contains a short label, a command, and reasoning/context suitable for the existing `request_tool` drafter. The user multi-selects which candidates are worth drafting via a repeated native select-menu toggle loop (toggle individual candidates, select/clear all, then confirm). Each selected candidate is then passed through the same single-tool draft/editor/approval path used by `request_tool`, so naming, descriptions, guidelines, approval flags, destination choice, validation, saving, and registration remain centralized in the existing flow.
 
@@ -215,17 +215,19 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 
 - At execution time, secrets are fetched from keychain and injected as environment variables
 - Secret values are redacted from all tool output (both streamed updates and final result)
-- `/armory secrets` opens a native select menu to manage stored keychain entries (account list → status/action menu for set/update or delete). Setting or updating a value is collected by a local macOS `osascript` hidden-answer dialog (native, not a Pi dialog), so the secret value itself never traverses the Pi/Paseo UI layer or transcript
+- `/armory secrets` opens a native select menu to manage stored keychain entries (account list → status/action menu for set/update or delete). Setting or updating a value is collected by a local macOS `osascript` hidden-answer dialog (native, not a Pi dialog), so the secret value itself never traverses the Pi/Paseo UI layer or transcript. That value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may briefly be visible to local process inspection (e.g. `ps`) during that call
+- Secrets and `/armory secrets` are macOS-only: they depend on the macOS Keychain (`security`) and a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop able to display dialogs). There is no cross-platform fallback
 - If a secret is missing from keychain at execution time, the fetch throws an error
 
 1. Agent calls `request_tool` with `{ command, reasoning, context? }`
+   - Only one `request_tool` call may be in flight at a time; a concurrent call is blocked with a message asking the agent to call it one at a time (enforced by the extension's `tool_call`/`tool_execution_end` handlers)
    - `command`: the shell command or script path
    - `reasoning`: why this tool is needed, what problem it solves
    - `context`: optional file contents, script bodies, or usage examples that inform the draft
 2. If a draft model is configured, it produces a full tool definition from the input
    - If the model lacks sufficient context (e.g., script contents not provided), it rejects with a reason
    - The agent receives `"Draft rejected: <reason>"` and can retry with more context
-3. Tool name is auto-normalized (lowercase, underscores; e.g., "Run Tests" → `run_tests`)
+3. Tool name is auto-normalized (lowercased; spaces/dashes become underscores; non `[a-z0-9_]` characters stripped; leading digits/underscores stripped so the result starts with a letter; e.g., "Run Tests" → `run_tests`). `request_tool` is a reserved name and is rejected if used
 4. A repeated native select menu is shown (the tool form) where the human can:
    - See the proposed tool summarized in the menu title
    - Choose a field to edit — name/re-draft instruction via `ui.input`, command/description via `ui.editor`, add/remove guidelines via `ui.input`
@@ -314,7 +316,7 @@ When editing an existing tool:
 - If the user toggles destination, require confirmation before applying changes
 - If moving from session → project/global, write to the chosen config and remove from the session registry
 - If moving from project/global → session, remove from the source config and keep the tool only in the session registry
-- If moving from global → project, the project version overrides (existing merge semantics)
+- If moving from global → project, write to project config and remove from global config — other projects lose access to this tool
 - If moving from project → global, remove from project config to avoid shadowing
 - If renaming/removing a higher-precedence tool reveals a lower-precedence persisted tool with the old name, re-register the revealed tool instead of deactivating the name
 

@@ -368,7 +368,8 @@ describe("handleEdit", () => {
     await handler("edit global_tool", ctx as never);
 
     const [confirmMsg] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(confirmMsg).toContain("only be available in this project");
+    expect(confirmMsg).toContain("removed from global config");
+    expect(confirmMsg).toContain("other projects will no longer have it");
     expect(saveConfig).toHaveBeenCalledWith(toolGlobal, "project", "/project");
     expect(removeFromConfig).toHaveBeenCalledWith("global_tool", "global", "/project");
   });

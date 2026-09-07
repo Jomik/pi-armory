@@ -162,7 +162,7 @@ function scopeChangeMessage(name: string, from: ToolSource, to: ToolSource): str
   if (from === "global" && to === "project") {
     return (
       `Move '${name}' from global config to project config (.pi/armory.json)?\n` +
-      `It will only be available in this project and will override the global version.`
+      `It will be removed from global config, so other projects will no longer have it — it will only be available in this project.`
     );
   }
   return `Change destination for '${name}' from ${from} to ${to}?`;
