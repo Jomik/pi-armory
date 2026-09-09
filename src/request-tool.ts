@@ -57,6 +57,13 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
+      if (ctx.mode !== "tui") {
+        return {
+          content: [{ type: "text", text: "request_tool requires the interactive TUI" }],
+          details: undefined,
+        };
+      }
+
       // Resolve draft model: prefer configured "provider:modelId", fall back to session model
       let draftModel: Model<Api> | undefined;
       if (draftModelName) {
