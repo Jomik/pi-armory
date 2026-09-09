@@ -108,13 +108,13 @@ Tool names are automatically normalized: lowercased, spaces/dashes collapsed to 
 
 Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
 
-The review prompt is a native select menu whose title shows the command and its parameters. Actions:
+The review prompt is a structured TUI approval panel showing the command template and its parameters. Actions:
 
 - **Run** - execute the command with the displayed parameters
 - **Edit** - shown only when the tool has parameters; opens the tool call's parameter JSON in pi's standard editor for direct editing
 - **Reject** - decline; execution does not proceed
 
-Edits are schema-validated; once valid, the view returns to the review menu before you can Run. This approval flow requires Pi's TUI mode; calls made without a TUI (e.g., headless/non-interactive runs, or RPC clients such as Paseo) are blocked outright. Armory relies on Pi's standard prompt lifecycle for this blocked state. See [DESIGN.md](DESIGN.md) for implementation details.
+Edits are schema-validated; once valid, the view returns to the approval panel before you can Run. This approval flow requires Pi's TUI mode; calls made without a TUI (e.g., headless/non-interactive runs, or RPC clients such as Paseo) are blocked outright. Armory relies on Pi's standard prompt lifecycle for this blocked state. See [DESIGN.md](DESIGN.md) for implementation details.
 
 ### Environment variables
 
