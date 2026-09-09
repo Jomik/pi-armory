@@ -117,6 +117,16 @@ describe("toolFormPanel guideline editing", () => {
 
     expect(getResult()?.guidelines).toEqual(["first", "second"]);
   });
+
+  it("does not remove guidelines when backspacing on an already-empty add-new row", () => {
+    const { panel, getResult } = makePanel(["first", "second"]);
+    focusGuidelines(panel);
+
+    backspace(panel, 1); // add-new row already empty
+    approveFromGuidelines(panel);
+
+    expect(getResult()?.guidelines).toEqual(["first", "second"]);
+  });
 });
 
 function focusRedraft(panel: ReturnType<typeof makePanel>["panel"]) {

@@ -470,13 +470,8 @@ export function toolFormPanel(
           tui.requestRender();
           return;
         }
-        if (matchesKey(data, Key.backspace) && guidelinesEditor.getText() === "" && guidelines.length > 0) {
-          if (selected !== null) {
-            deleteGuideline(selected);
-          } else {
-            guidelines = guidelines.slice(0, -1);
-            selectGuideline(guidelines.length);
-          }
+        if (matchesKey(data, Key.backspace) && guidelinesEditor.getText() === "" && selected !== null) {
+          deleteGuideline(selected);
           tui.requestRender();
           return;
         }
