@@ -1,9 +1,9 @@
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { describe, expect, it, vi } from "vitest";
 import type { CandidateRequest } from "../src/draft.js";
 import { generateCandidateRequests } from "../src/draft.js";
 
-vi.mock("@earendil-works/pi-ai");
+vi.mock("@earendil-works/pi-ai/compat");
 
 const mockStreamSimple = vi.mocked(streamSimple);
 

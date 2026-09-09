@@ -274,6 +274,11 @@ export async function handleOnboard(
   projectRoot: string,
   draftModelName: string | undefined,
 ): Promise<void> {
+  if (ctx.mode !== "tui") {
+    ctx.ui.notify("/armory onboard requires the interactive TUI.", "error");
+    return;
+  }
+
   // Resolve draft model — try configured name first, fall back to session model
   let draftModel: Model<Api> | undefined;
   if (draftModelName) {

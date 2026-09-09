@@ -1,11 +1,11 @@
 // src/draft.ts
 
-import type { Api, Model } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 
 export interface DraftAuth {
   apiKey?: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   baseUrl?: string;
 }
 

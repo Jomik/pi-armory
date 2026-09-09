@@ -92,14 +92,16 @@ function makeCtx(
     modelResolved?: boolean;
     authOk?: boolean;
     sessionModel?: unknown;
+    mode?: string;
   } = {},
 ) {
-  const { selectResponses = [], modelResolved = true, authOk = true, sessionModel = undefined } = opts;
+  const { selectResponses = [], modelResolved = true, authOk = true, sessionModel = undefined, mode = "tui" } = opts;
   const selectQueue = [...selectResponses];
 
   vi.mocked(resolveModel).mockReturnValue(modelResolved ? fakeResolvedModel : undefined);
 
   const ctx = {
+    mode,
     modelRegistry: {
       getApiKeyAndHeaders: vi.fn().mockResolvedValue(authOk ? { ok: true, apiKey: "test-key" } : { ok: false }),
     },
@@ -111,6 +113,21 @@ function makeCtx(
   };
   return ctx;
 }
+
+describe("handleOnboard — RPC mode guard", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("notifies and returns early when ctx.mode is not 'tui' — no model/evidence/candidate work", async () => {
+    const pi = makePi();
+    const ctx = makeCtx({ mode: "rpc" });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("TUI"), "error");
+    expect(ctx.modelRegistry.getApiKeyAndHeaders).not.toHaveBeenCalled();
+    expect(mockGenerateCandidates).not.toHaveBeenCalled();
+  });
+});
 
 describe("handleOnboard — no model", () => {
   beforeEach(() => {

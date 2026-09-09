@@ -14,6 +14,8 @@ Or try it without installing:
 pi -e npm:pi-armory
 ```
 
+Requires `@earendil-works/pi` (and the `pi-ai`, `pi-coding-agent`, `pi-tui` packages) version `0.85.1` or later. Interactive request/review/approval workflows require Pi's TUI mode and are not supported in RPC clients.
+
 ## Design
 
 See [DESIGN.md](./DESIGN.md) for the full specification.
@@ -30,7 +32,7 @@ See [DESIGN.md](./DESIGN.md) for the full specification.
 
 pi-armory provides a fixed set of named command tools. Each tool runs a shell command with optional `{{parameter}}` placeholders - values are shell-escaped before interpolation.
 
-All interactive review, editing, and secrets flows use Pi's native dialogs (`select`, `input`, `editor`), so they work the same in the TUI and in RPC clients such as Paseo. There is no custom/bespoke UI panel.
+Tool review and editing use a single Pi TUI custom form with inline field editing - guidelines, the approval toggle, destination, re-draft, and approve/reject all live in that one form. Simple selection and confirmation prompts (e.g. pickers, native confirm dialogs) use Pi's standard dialog primitives. Interactive request/review/approval workflows require Pi's TUI mode and are not supported in RPC clients such as Paseo.
 
 ### Config
 
@@ -79,7 +81,7 @@ Values are shell-escaped before substitution. No separate `parameters` config fi
 
 ### Bootstrapping
 
-Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via a native review flow — a repeated select menu (with input/editor dialogs for individual fields) — that works identically in the TUI and in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.
+Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via the single Pi TUI custom form (inline field editing, guidelines, approval toggle, destination, re-draft, approve/reject). This requires Pi's TUI mode and is not supported in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.
 
 ```
 Agent calls: request_tool({
@@ -88,7 +90,7 @@ Agent calls: request_tool({
   context: "<contents of scripts/deploy.sh>"
 })
 → Draft model produces a full tool definition (or rejects if context is insufficient)
-→ Human sees a native review menu, can edit fields, add/remove guidelines, toggle approval, choose destination
+→ Human sees the TUI custom review form, can edit fields inline, add/remove guidelines, toggle approval, choose destination
 → On approve:
     Session  - registered in-memory only, available next turn, gone when the session ends
     Project  - saved to .pi/armory.json and available next turn
@@ -106,13 +108,13 @@ Tool names are automatically normalized: lowercased, spaces/dashes collapsed to 
 
 Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
 
-The review prompt is a native select menu whose title shows the command and its parameters. Actions:
+The review prompt is a structured TUI approval panel showing the command template and its parameters. Actions:
 
 - **Run** - execute the command with the displayed parameters
 - **Edit** - shown only when the tool has parameters; opens the tool call's parameter JSON in pi's standard editor for direct editing
 - **Reject** - decline; execution does not proceed
 
-Edits are schema-validated; once valid, the view returns to the review menu before you can Run. Calls made without a UI (e.g., headless/non-interactive runs) are blocked outright. See [DESIGN.md](DESIGN.md) for implementation details.
+Edits are schema-validated; once valid, the view returns to the approval panel before you can Run. This approval flow requires Pi's TUI mode; calls made without a TUI (e.g., headless/non-interactive runs, or RPC clients such as Paseo) are blocked outright. Armory relies on Pi's standard prompt lifecycle for this blocked state. See [DESIGN.md](DESIGN.md) for implementation details.
 
 ### Environment variables
 
@@ -179,7 +181,7 @@ Names are returned as stored in `.pi/armory.json`, sorted alphabetically. Global
 
 ### Editing tools
 
-`/armory edit [name]` opens the native review-menu/dialog flow for an existing tool (the same select/input/editor primitives used by `request_tool`). If no name is given, a picker lists all tools (session + project + global). You can edit any field and optionally re-draft with AI.
+`/armory edit [name]` opens the same single Pi TUI custom form used by `request_tool` for an existing tool. If no name is given, a picker lists all tools (session + project + global). You can edit any field and optionally re-draft with AI.
 
 If you change the **Destination** field, a confirmation is shown before the change is applied:
 
@@ -209,8 +211,8 @@ All deletions require confirmation. Deleting a tool deactivates that name for th
 
 ### Onboarding
 
-`/armory onboard` asks a draft model what common development operations this project needs tools for, then lets you pick which to draft. It requires either a configured `draftModel` (in `.pi/armory.json` or `~/.pi/agent/armory.json`) or an active session model; if neither is available, onboarding reports an error and does not proceed.
+`/armory onboard` asks a draft model what common development operations this project needs tools for, then lets you pick which to draft. It requires Pi's interactive TUI mode, and only then either a configured `draftModel` (in `.pi/armory.json` or `~/.pi/agent/armory.json`) or an active session model; without a TUI it fails clearly and does not proceed, and if a TUI is present but neither a draft model nor a session model is available, onboarding reports an error and does not proceed.
 
 1. A native select menu lists proposed candidates as a repeated toggle loop - toggle individual candidates on/off, or `Select all`/`Clear all`, then `Confirm` or `Cancel`.
-2. Each selected candidate goes through the same draft/review flow as `request_tool` (native review menu, edit fields, choose destination, approve/reject).
+2. Each selected candidate goes through the same draft/review flow as `request_tool` (TUI custom review form, edit fields, choose destination, approve/reject).
 3. Approved tools are saved and registered exactly like tools created via `request_tool`, available next turn.

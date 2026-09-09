@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-ai");
+vi.mock("@earendil-works/pi-ai/compat");
 
 vi.mock("../src/config.js", () => ({
   saveConfig: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("../src/register-tool.js", () => {
   };
 });
 
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { saveConfig } from "../src/config.js";
 import { registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
 import { registerRequestTool } from "../src/request-tool.js";
@@ -25,12 +25,10 @@ describe("request_tool session destination", () => {
     (sessionRegistry as Map<string, unknown>).clear();
 
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const eventEmit = vi.fn();
     const pi = {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: eventEmit },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -39,13 +37,18 @@ describe("request_tool session destination", () => {
 
     const ctx = {
       hasUI: true,
+      mode: "tui",
       modelRegistry: {},
       model: undefined,
       ui: {
-        select: vi.fn().mockResolvedValueOnce("Edit name").mockResolvedValueOnce("Save"),
-        input: vi.fn().mockResolvedValueOnce("run_tests"),
-        editor: vi.fn(),
-        notify: vi.fn(),
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "session",
+        }),
       },
     };
 
@@ -79,25 +82,24 @@ describe("request_tool session destination", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
 
     const ctx = {
       hasUI: true,
+      mode: "tui",
       modelRegistry: {},
       model: undefined,
       ui: {
-        select: vi
-          .fn()
-          .mockResolvedValueOnce("Edit name")
-          .mockResolvedValueOnce("Set destination")
-          .mockResolvedValueOnce("project")
-          .mockResolvedValueOnce("Save"),
-        input: vi.fn().mockResolvedValueOnce("run_tests"),
-        editor: vi.fn(),
-        notify: vi.fn(),
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "project",
+        }),
       },
     };
 
@@ -112,33 +114,30 @@ describe("request_tool session destination", () => {
     expect(sessionRegistry.has("run_tests")).toBe(false);
   });
 
-  it("emits herdr:blocked active before showToolEditor and inactive after", async () => {
+  it("rejects before drafting when ctx.mode is not 'tui'", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
 
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const emitMock = vi.fn();
     const pi = {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: emitMock },
     };
 
     registerRequestTool(pi as never, "/project");
 
+    const customMock = vi.fn();
     const ctx = {
       hasUI: true,
-      modelRegistry: {},
-      model: undefined,
-      ui: {
-        select: vi.fn().mockResolvedValueOnce("Edit name").mockResolvedValueOnce("Save"),
-        input: vi.fn().mockResolvedValueOnce("run_tests"),
-        editor: vi.fn(),
-        notify: vi.fn(),
+      mode: "rpc",
+      modelRegistry: {
+        getApiKeyAndHeaders: vi.fn(),
       },
+      model: undefined,
+      ui: { custom: customMock },
     };
 
-    await requestTool?.execute(
+    const result = await requestTool?.execute(
       "tool-call-id",
       { command: "npm test", reasoning: "Run tests" },
       new AbortController().signal,
@@ -146,47 +145,11 @@ describe("request_tool session destination", () => {
       ctx,
     );
 
-    expect(emitMock).toHaveBeenNthCalledWith(1, "herdr:blocked", { active: true, label: "review proposed tool" });
-    expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
-  });
-
-  it("emits herdr:blocked inactive in finally when showToolEditor rejects", async () => {
-    (sessionRegistry as Map<string, unknown>).clear();
-
-    let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const emitMock = vi.fn();
-    const pi = {
-      registerTool: vi.fn((tool) => {
-        requestTool = tool as typeof requestTool;
-      }),
-      events: { emit: emitMock },
-    };
-
-    registerRequestTool(pi as never, "/project");
-
-    const ctx = {
-      hasUI: true,
-      modelRegistry: {},
-      model: undefined,
-      ui: {
-        select: vi.fn().mockRejectedValue(new Error("form closed")),
-        input: vi.fn(),
-        editor: vi.fn(),
-        notify: vi.fn(),
-      },
-    };
-
-    await expect(
-      requestTool?.execute(
-        "tool-call-id",
-        { command: "npm test", reasoning: "Run tests" },
-        new AbortController().signal,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow("form closed");
-
-    expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
+    expect(customMock).not.toHaveBeenCalled();
+    expect(ctx.modelRegistry.getApiKeyAndHeaders).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining("interactive TUI") }],
+    });
   });
 });
 
@@ -218,7 +181,6 @@ describe("request_tool enterprise baseUrl routing", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -234,6 +196,7 @@ describe("request_tool enterprise baseUrl routing", () => {
 
     const ctx = {
       hasUI: true,
+      mode: "tui",
       modelRegistry: {
         // Auth resolution returns the enterprise endpoint — request-tool must
         // propagate this baseUrl to the model passed to draftToolDefinition.
@@ -247,11 +210,15 @@ describe("request_tool enterprise baseUrl routing", () => {
       },
       model: sessionModel,
       ui: {
-        // The drafted values already match the expected result, so Save immediately.
-        select: vi.fn().mockResolvedValue("Save"),
-        input: vi.fn(),
-        editor: vi.fn(),
-        notify: vi.fn(),
+        // Return a valid form result so the execute() path completes normally.
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Runs the test suite",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "session",
+        }),
       },
     };
 
@@ -269,7 +236,7 @@ describe("request_tool enterprise baseUrl routing", () => {
 });
 
 describe("request_tool draft stream terminal error propagation", () => {
-  it("rejects with the stream errorMessage and does not open the tool review menu", async () => {
+  it("rejects with the stream errorMessage and does not open ctx.ui.custom", async () => {
     const mockStreamSimple = vi.mocked(streamSimple);
 
     // biome-ignore lint/suspicious/noExplicitAny: test async-generator mock
@@ -307,7 +274,6 @@ describe("request_tool draft stream terminal error propagation", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -315,14 +281,15 @@ describe("request_tool draft stream terminal error propagation", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: minimal fake model
     const fakeModel: any = { id: "test", name: "test-model" };
-    const selectMock = vi.fn();
+    const customMock = vi.fn();
     const ctx = {
       hasUI: true,
+      mode: "tui",
       modelRegistry: {
         getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: "test-key" }),
       },
       model: fakeModel,
-      ui: { select: selectMock, input: vi.fn(), editor: vi.fn(), notify: vi.fn() },
+      ui: { custom: customMock },
     };
 
     await expect(
@@ -335,6 +302,6 @@ describe("request_tool draft stream terminal error propagation", () => {
       ),
     ).rejects.toThrow("draft unavailable");
 
-    expect(selectMock).not.toHaveBeenCalled();
+    expect(customMock).not.toHaveBeenCalled();
   });
 });

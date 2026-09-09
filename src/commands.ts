@@ -262,6 +262,11 @@ async function handleEdit(
   deps: ArmoryCommandDeps,
   toolName?: string,
 ): Promise<void> {
+  if (ctx.mode !== "tui") {
+    ctx.ui.notify("/armory edit requires the interactive TUI.", "error");
+    return;
+  }
+
   // If no name, show a picker including session tools
   let selectedName = toolName;
   if (!selectedName) {
