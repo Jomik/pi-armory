@@ -59,60 +59,61 @@ const factory: ExtensionFactory = async (pi) => {
       return { block: true, reason: `Cannot run '${tool.name}': ${msg}` };
     }
 
-    pi.events.emit("herdr:blocked", { active: true, label: `approve tool: ${tool.name}` });
-    try {
-      if (!ctx.hasUI) {
-        return { block: true, reason: `Cannot run '${tool.name}': approval required but no UI is available.` };
+    if (ctx.mode !== "tui") {
+      return {
+        block: true,
+        reason: `Cannot run '${tool.name}': approval required but the session is not in interactive TUI mode.`,
+      };
+    }
+    if (!ctx.hasUI) {
+      return { block: true, reason: `Cannot run '${tool.name}': approval required but no UI is available.` };
+    }
+
+    const allowEdit = parsePlaceholders(tool.command).length > 0;
+
+    for (;;) {
+      const title = [
+        `Approve tool: ${tool.name}`,
+        `Command: ${tool.command}`,
+        "Parameters:",
+        JSON.stringify(input, null, 2),
+      ].join("\n");
+      const options = allowEdit ? ["Run", "Edit", "Reject"] : ["Run", "Reject"];
+      const choice = await ctx.ui.select(title, options);
+      const action: "run" | "edit" | "reject" =
+        choice === "Run" ? "run" : choice === "Edit" && allowEdit ? "edit" : "reject";
+
+      if (action === "run") {
+        (event as { input: Record<string, unknown> }).input = input;
+        return;
+      }
+      if (action === "reject") {
+        return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
       }
 
-      const allowEdit = parsePlaceholders(tool.command).length > 0;
-
+      // action === "edit": loop on the editor until valid input, cancel, or dismissal.
       for (;;) {
-        const title = [
-          `Approve tool: ${tool.name}`,
-          `Command: ${tool.command}`,
-          "Parameters:",
-          JSON.stringify(input, null, 2),
-        ].join("\n");
-        const options = allowEdit ? ["Run", "Edit", "Reject"] : ["Run", "Reject"];
-        const choice = await ctx.ui.select(title, options);
-        const action: "run" | "edit" | "reject" =
-          choice === "Run" ? "run" : choice === "Edit" && allowEdit ? "edit" : "reject";
+        const edited = await ctx.ui.editor(`Edit parameters: ${tool.name}`, JSON.stringify(input, null, 2));
+        if (edited === undefined) break; // cancel -> back to review, unchanged
 
-        if (action === "run") {
-          (event as { input: Record<string, unknown> }).input = input;
-          return;
-        }
-        if (action === "reject") {
-          return { block: true, reason: `Execution of '${tool.name}' rejected by user.` };
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(edited);
+        } catch {
+          ctx.ui.notify("Invalid JSON. Fix and retry, or cancel to keep current values.", "error");
+          continue;
         }
 
-        // action === "edit": loop on the editor until valid input, cancel, or dismissal.
-        for (;;) {
-          const edited = await ctx.ui.editor(`Edit parameters: ${tool.name}`, JSON.stringify(input, null, 2));
-          if (edited === undefined) break; // cancel -> back to review, unchanged
-
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(edited);
-          } catch {
-            ctx.ui.notify("Invalid JSON. Fix and retry, or cancel to keep current values.", "error");
-            continue;
-          }
-
-          const validated = validateToolParams(schema, parsed);
-          if (!validated.ok) {
-            ctx.ui.notify(`Invalid parameters: ${validated.message}`, "error");
-            continue;
-          }
-
-          input = validated.value;
-          (event as { input: Record<string, unknown> }).input = input;
-          break; // valid edit -> back to review
+        const validated = validateToolParams(schema, parsed);
+        if (!validated.ok) {
+          ctx.ui.notify(`Invalid parameters: ${validated.message}`, "error");
+          continue;
         }
+
+        input = validated.value;
+        (event as { input: Record<string, unknown> }).input = input;
+        break; // valid edit -> back to review
       }
-    } finally {
-      pi.events.emit("herdr:blocked", { active: false });
     }
   });
 

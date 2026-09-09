@@ -40,7 +40,7 @@ const fakePi = {
   setActiveTools: vi.fn(),
   on: vi.fn(),
   registerTool: vi.fn(),
-  events: { emit: vi.fn(), on: vi.fn() },
+  events: { on: vi.fn() },
 } as unknown as Parameters<typeof factory>[0];
 
 describe("factory", () => {
@@ -130,7 +130,7 @@ describe("factory", () => {
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
       const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const event = { toolName: "dangerous", input: { path: "/tmp" } };
       const result = await handler?.(event, ctx);
 
@@ -147,7 +147,7 @@ describe("factory", () => {
 
       const distinctivePath = "/very/distinctive/unlikely-value-marker";
       const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const event = { toolName: "dangerous", input: { path: distinctivePath } };
       await handler?.(event, ctx);
 
@@ -166,7 +166,7 @@ describe("factory", () => {
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
       const selectMock = vi.fn().mockResolvedValue("Reject");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
@@ -178,7 +178,7 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn().mockResolvedValue(undefined);
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
@@ -190,7 +190,7 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn().mockResolvedValue("???");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(result).toEqual({ block: true, reason: expect.stringContaining("rejected") });
@@ -204,7 +204,7 @@ describe("factory", () => {
       const selectMock = vi.fn().mockResolvedValueOnce("Edit").mockResolvedValueOnce("Run");
       const editorMock = vi.fn().mockResolvedValue(JSON.stringify({ path: "/edited" }));
       const notifyMock = vi.fn();
-      const ctx = { hasUI: true, ui: { select: selectMock, editor: editorMock, notify: notifyMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock, editor: editorMock, notify: notifyMock } };
       const event = { toolName: "dangerous", input: { path: "/tmp" } };
       const result = await handler?.(event, ctx);
 
@@ -225,7 +225,7 @@ describe("factory", () => {
       const selectMock = vi.fn().mockResolvedValueOnce("Edit").mockResolvedValueOnce("Reject");
       const editorMock = vi.fn().mockResolvedValueOnce("{ not json").mockResolvedValueOnce(undefined);
       const notifyMock = vi.fn();
-      const ctx = { hasUI: true, ui: { select: selectMock, editor: editorMock, notify: notifyMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock, editor: editorMock, notify: notifyMock } };
       const event = { toolName: "dangerous", input: { path: "/tmp" } };
       const result = await handler?.(event, ctx);
 
@@ -241,7 +241,7 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(selectMock).toHaveBeenCalledOnce();
@@ -258,29 +258,24 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       await handler?.({ toolName: "cleanup", input: {} }, ctx);
 
       expect(selectMock).toHaveBeenCalledOnce();
       expect(selectMock.mock.calls[0][1]).toEqual(["Run", "Reject"]);
     });
 
-    it("blocks approval-required calls when there is no UI, preserving the herdr:blocked lifecycle", async () => {
+    it("blocks approval-required calls when there is no UI", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
       await factory(fakePi);
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn();
-      const ctx = { hasUI: false, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: false, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
 
       expect(selectMock).not.toHaveBeenCalled();
       expect(result).toEqual({ block: true, reason: expect.stringContaining("no UI is available") });
-
-      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
-      const emitMock = fakePi.events.emit as any;
-      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: true, label: "approve tool: dangerous" });
-      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
     });
 
     it("blocks and does not open approval UI when initial input fails schema validation", async () => {
@@ -289,7 +284,7 @@ describe("factory", () => {
 
       const handler = getToolCallHandler();
       const selectMock = vi.fn();
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "dangerous", input: {} }, ctx);
 
       expect(selectMock).not.toHaveBeenCalled();
@@ -299,49 +294,24 @@ describe("factory", () => {
       });
     });
 
-    it("emits herdr:blocked active before approval UI and inactive after run", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
-      await factory(fakePi);
-
-      const handler = getToolCallHandler();
-      const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
-      await handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx);
-
-      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
-      const emitMock = fakePi.events.emit as any;
-      expect(emitMock).toHaveBeenNthCalledWith(1, "herdr:blocked", { active: true, label: "approve tool: dangerous" });
-      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
-    });
-
-    it("emits herdr:blocked inactive in finally when approval UI throws", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
-      await factory(fakePi);
-
-      const handler = getToolCallHandler();
-      const selectMock = vi.fn().mockRejectedValue(new Error("UI closed"));
-      const ctx = { hasUI: true, ui: { select: selectMock } };
-      await expect(handler?.({ toolName: "dangerous", input: { path: "/tmp" } }, ctx)).rejects.toThrow("UI closed");
-
-      // biome-ignore lint/suspicious/noExplicitAny: test helper accessing mock
-      const emitMock = fakePi.events.emit as any;
-      expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
-    });
-
-    it("in RPC mode with UI available, requests approval via ui.select and allows execution on Run", async () => {
+    it("blocks approval-required calls in RPC mode even when hasUI is true, without opening any UI primitive", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ tools: [approvalTool], draftModel: undefined, disableBash: false });
       await factory(fakePi);
 
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
-      const selectMock = vi.fn().mockResolvedValue("Run");
-      const ctx = { mode: "rpc", hasUI: true, ui: { select: selectMock } };
+      const selectMock = vi.fn();
+      const editorMock = vi.fn();
+      const ctx = { mode: "rpc", hasUI: true, ui: { select: selectMock, editor: editorMock } };
       const event = { toolName: "dangerous", input: { path: "/tmp" } };
       const result = await handler?.(event, ctx);
 
-      expect(selectMock).toHaveBeenCalledOnce();
-      expect(selectMock.mock.calls[0][1]).toEqual(["Run", "Edit", "Reject"]);
-      expect(result).toBeUndefined();
+      expect(selectMock).not.toHaveBeenCalled();
+      expect(editorMock).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        block: true,
+        reason: expect.stringContaining("interactive TUI"),
+      });
     });
 
     it("includes runtime-registered tools in approval checks", async () => {
@@ -359,7 +329,7 @@ describe("factory", () => {
       const handler = getToolCallHandler();
       expect(handler).toBeDefined();
       const selectMock = vi.fn().mockResolvedValue("Reject");
-      const ctx = { hasUI: true, ui: { select: selectMock } };
+      const ctx = { mode: "tui", hasUI: true, ui: { select: selectMock } };
       const result = await handler?.({ toolName: "new-tool", input: {} }, ctx);
 
       expect(selectMock).toHaveBeenCalledOnce();

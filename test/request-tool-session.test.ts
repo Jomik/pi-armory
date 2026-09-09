@@ -25,12 +25,10 @@ describe("request_tool session destination", () => {
     (sessionRegistry as Map<string, unknown>).clear();
 
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const eventEmit = vi.fn();
     const pi = {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: eventEmit },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -84,7 +82,6 @@ describe("request_tool session destination", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -117,86 +114,6 @@ describe("request_tool session destination", () => {
     expect(sessionRegistry.has("run_tests")).toBe(false);
   });
 
-  it("emits herdr:blocked active before showToolEditor and inactive after", async () => {
-    (sessionRegistry as Map<string, unknown>).clear();
-
-    let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const emitMock = vi.fn();
-    const pi = {
-      registerTool: vi.fn((tool) => {
-        requestTool = tool as typeof requestTool;
-      }),
-      events: { emit: emitMock },
-    };
-
-    registerRequestTool(pi as never, "/project");
-
-    const ctx = {
-      hasUI: true,
-      mode: "tui",
-      modelRegistry: {},
-      model: undefined,
-      ui: {
-        custom: vi.fn().mockResolvedValue({
-          name: "run_tests",
-          command: "npm test",
-          description: "Run tests",
-          guidelines: [],
-          requiresApproval: false,
-          destination: "session",
-        }),
-      },
-    };
-
-    await requestTool?.execute(
-      "tool-call-id",
-      { command: "npm test", reasoning: "Run tests" },
-      new AbortController().signal,
-      undefined,
-      ctx,
-    );
-
-    expect(emitMock).toHaveBeenNthCalledWith(1, "herdr:blocked", { active: true, label: "review proposed tool" });
-    expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
-  });
-
-  it("emits herdr:blocked inactive in finally when showToolEditor rejects", async () => {
-    (sessionRegistry as Map<string, unknown>).clear();
-
-    let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const emitMock = vi.fn();
-    const pi = {
-      registerTool: vi.fn((tool) => {
-        requestTool = tool as typeof requestTool;
-      }),
-      events: { emit: emitMock },
-    };
-
-    registerRequestTool(pi as never, "/project");
-
-    const ctx = {
-      hasUI: true,
-      mode: "tui",
-      modelRegistry: {},
-      model: undefined,
-      ui: {
-        custom: vi.fn().mockRejectedValue(new Error("form closed")),
-      },
-    };
-
-    await expect(
-      requestTool?.execute(
-        "tool-call-id",
-        { command: "npm test", reasoning: "Run tests" },
-        new AbortController().signal,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow("form closed");
-
-    expect(emitMock).toHaveBeenCalledWith("herdr:blocked", { active: false });
-  });
-
   it("rejects before drafting when ctx.mode is not 'tui'", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
 
@@ -205,7 +122,6 @@ describe("request_tool session destination", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -265,7 +181,6 @@ describe("request_tool enterprise baseUrl routing", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
@@ -359,7 +274,6 @@ describe("request_tool draft stream terminal error propagation", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
-      events: { emit: vi.fn() },
     };
 
     registerRequestTool(pi as never, "/project");
