@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-ai");
+vi.mock("@earendil-works/pi-ai/compat");
 
 vi.mock("../src/config.js", () => ({
   saveConfig: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("../src/register-tool.js", () => {
   };
 });
 
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { saveConfig } from "../src/config.js";
 import { registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
 import { registerRequestTool } from "../src/request-tool.js";

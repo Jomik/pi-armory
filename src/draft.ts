@@ -1,7 +1,7 @@
 // src/draft.ts
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 
 export interface DraftAuth {
   apiKey?: string;
