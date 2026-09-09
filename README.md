@@ -211,7 +211,7 @@ All deletions require confirmation. Deleting a tool deactivates that name for th
 
 ### Onboarding
 
-`/armory onboard` asks a draft model what common development operations this project needs tools for, then lets you pick which to draft. It requires either a configured `draftModel` (in `.pi/armory.json` or `~/.pi/agent/armory.json`) or an active session model; if neither is available, onboarding reports an error and does not proceed.
+`/armory onboard` asks a draft model what common development operations this project needs tools for, then lets you pick which to draft. It requires Pi's interactive TUI mode, and only then either a configured `draftModel` (in `.pi/armory.json` or `~/.pi/agent/armory.json`) or an active session model; without a TUI it fails clearly and does not proceed, and if a TUI is present but neither a draft model nor a session model is available, onboarding reports an error and does not proceed.
 
 1. A native select menu lists proposed candidates as a repeated toggle loop - toggle individual candidates on/off, or `Select all`/`Clear all`, then `Confirm` or `Cancel`.
 2. Each selected candidate goes through the same draft/review flow as `request_tool` (TUI custom review form, edit fields, choose destination, approve/reject).
