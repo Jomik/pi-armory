@@ -2,14 +2,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
-import { fetchSecret } from "../src/keychain.js";
 import { approvalRegistry, registerArmoryTool, toolRegistry } from "../src/register-tool.js";
 
 vi.mock("../src/executor.js");
-vi.mock("../src/keychain.js");
 
 const mockExecuteCommand = vi.mocked(executeCommand);
-const mockFetchSecret = vi.mocked(fetchSecret);
 
 // Shape of the update object passed to the tool's onUpdate callback
 type ToolUpdate = { content: { type: string; text: string }[]; details: undefined };
@@ -63,7 +60,6 @@ const approvalTool: ArmoryTool = {
 describe("registerArmoryTool", () => {
   beforeEach(() => {
     mockExecuteCommand.mockReset();
-    mockFetchSecret.mockReset();
     approvalRegistry.clear();
     toolRegistry.clear();
   });
@@ -193,92 +189,26 @@ describe("registerArmoryTool", () => {
     expect(opts?.onUpdate).toBeUndefined();
   });
 
-  describe("secrets", () => {
-    const secretTool: ArmoryTool = {
-      name: "secret-tool",
-      command: "deploy",
-      description: "Deploy with secrets",
-      secrets: { API_KEY: "api-key-account", DB_PASS: "db-pass-account" },
-    };
-
-    it("fetches secrets from keychain and passes them as extraEnv", async () => {
-      mockFetchSecret.mockImplementation(async (account) => `value-for-${account}`);
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(secretTool);
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      expect(mockFetchSecret).toHaveBeenCalledWith("api-key-account");
-      expect(mockFetchSecret).toHaveBeenCalledWith("db-pass-account");
-
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toEqual({
-        API_KEY: "value-for-api-key-account",
-        DB_PASS: "value-for-db-pass-account",
-      });
-    });
-
-    it("passes fetched secret values as redact array", async () => {
-      mockFetchSecret.mockImplementation(async (account) => `value-for-${account}`);
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(secretTool);
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.redact).toContain("value-for-api-key-account");
-      expect(opts?.redact).toContain("value-for-db-pass-account");
-    });
-
-    it("does not call fetchSecret when tool has no secrets", async () => {
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(baseTool);
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      expect(mockFetchSecret).not.toHaveBeenCalled();
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toBeUndefined();
-      expect(opts?.redact).toBeUndefined();
-    });
-
-    it("does not call fetchSecret when secrets is empty object", async () => {
-      const toolWithEmptySecrets: ArmoryTool = {
-        name: "no-secrets-tool",
-        command: "echo hi",
-        description: "No secrets",
-        secrets: {},
-      };
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(toolWithEmptySecrets);
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      expect(mockFetchSecret).not.toHaveBeenCalled();
-    });
-
-    it("propagates errors thrown by fetchSecret", async () => {
-      mockFetchSecret.mockRejectedValue(new Error("keychain locked"));
-      const execute = registerAndCapture(secretTool);
-
-      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
-        "keychain locked",
-      );
-    });
-  });
-
   describe("env", () => {
-    const envTool: ArmoryTool = {
-      name: "env-tool",
-      command: "deploy",
-      description: "Deploy with env",
-      env: { JIRA_SERVER: "https://jira.example.com", FORWARD: "$ARMORY_TEST_FWD" },
-    };
+    /**
+     * Distinguishes resolver-command invocations from the tool's main command by
+     * matching on the command string passed to executeCommand.
+     */
+    function mockResolverAndMain(resolvers: Record<string, string | Error>, mainOutput = "main-ok") {
+      mockExecuteCommand.mockImplementation(async (cmd) => {
+        if (Object.hasOwn(resolvers, cmd)) {
+          const result = resolvers[cmd];
+          if (result instanceof Error) throw result;
+          return result;
+        }
+        return mainOutput;
+      });
+    }
 
-    it("passes static env values as extraEnv", async () => {
+    it("passes a string literal verbatim and does not redact it", async () => {
       mockExecuteCommand.mockResolvedValue("ok");
       const execute = registerAndCapture({
-        name: "static-env",
+        name: "literal-tool",
         command: "echo hi",
         description: "test",
         env: { SERVER: "https://example.com" },
@@ -288,49 +218,227 @@ describe("registerArmoryTool", () => {
 
       const opts = mockExecuteCommand.mock.calls[0][1];
       expect(opts?.extraEnv).toEqual({ SERVER: "https://example.com" });
+      expect(opts?.redact).toBeUndefined();
     });
 
-    it("resolves $VAR references from process.env", async () => {
+    it("resolves { env } bindings from process.env", async () => {
       process.env.ARMORY_TEST_FWD = "forwarded-value";
       mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(envTool);
+      const execute = registerAndCapture({
+        name: "host-env-tool",
+        command: "echo hi",
+        description: "test",
+        env: { FORWARD: { env: "ARMORY_TEST_FWD" } },
+      });
 
       await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
 
       const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toEqual({
-        JIRA_SERVER: "https://jira.example.com",
-        FORWARD: "forwarded-value",
-      });
+      expect(opts?.extraEnv).toEqual({ FORWARD: "forwarded-value" });
       delete process.env.ARMORY_TEST_FWD;
     });
 
-    it("throws when a $VAR reference is not set in process.env", async () => {
+    it("throws a clear error when a { env } binding is absent from process.env", async () => {
       delete process.env.ARMORY_TEST_FWD;
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(envTool);
+      const execute = registerAndCapture({
+        name: "missing-host-env-tool",
+        command: "echo hi",
+        description: "test",
+        env: { FORWARD: { env: "ARMORY_TEST_FWD" } },
+      });
 
       await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
         /Environment variable 'ARMORY_TEST_FWD' \(referenced by env\.FORWARD\) is not set/,
       );
+      expect(mockExecuteCommand).not.toHaveBeenCalled();
     });
 
-    it("does not redact env values", async () => {
-      process.env.ARMORY_TEST_FWD = "forwarded-value";
+    it("resolves { command } bindings using the tool's cwd and abort signal, trimming stdout", async () => {
+      mockResolverAndMain({ "print-token": "  resolved-token  \n" });
+      const execute = registerAndCapture({
+        name: "command-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-token" } },
+      });
+      const { signal } = new AbortController();
+
+      await execute("call-1", {}, signal, undefined, makeCtx());
+
+      expect(mockExecuteCommand).toHaveBeenCalledWith(
+        "print-token",
+        expect.objectContaining({ cwd: "/test/cwd", signal }),
+      );
+      const resolverOpts = mockExecuteCommand.mock.calls[0][1];
+      expect(resolverOpts?.onUpdate).toBeUndefined();
+      expect(resolverOpts?.extraEnv).toBeUndefined();
+
+      const mainOpts = mockExecuteCommand.mock.calls[1][1];
+      expect(mainOpts?.extraEnv).toEqual({ TOKEN: "resolved-token" });
+    });
+
+    it("throws when a { command } binding produces empty (or whitespace-only) output", async () => {
+      mockResolverAndMain({ "print-token": "   \n" });
+      const execute = registerAndCapture({
+        name: "empty-output-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-token" } },
+      });
+
+      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        /produced no output/,
+      );
+    });
+
+    it("prevents the main command from running when a resolver fails", async () => {
+      mockResolverAndMain({ "print-token": new Error("boom") });
+      const execute = registerAndCapture({
+        name: "failing-resolver-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-token" } },
+      });
+
+      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow();
+
+      expect(mockExecuteCommand).toHaveBeenCalledOnce();
+      expect(mockExecuteCommand).toHaveBeenCalledWith("print-token", expect.anything());
+    });
+
+    it("suppresses resolver stdout/stderr/error text when a secret binding's command fails", async () => {
+      mockResolverAndMain({
+        "print-secret": new Error("leaked-secret-detail: sk-super-sensitive-value"),
+      });
+      const execute = registerAndCapture({
+        name: "secret-failure-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-secret", secret: true } },
+      });
+
+      let caught: unknown;
+      try {
+        await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      const message = (caught as Error).message;
+      expect(message).toContain("env.TOKEN");
+      expect(message).not.toContain("sk-super-sensitive-value");
+      expect(message).not.toContain("leaked-secret-detail");
+    });
+
+    it("retains useful error context when a non-secret binding's command fails", async () => {
+      mockResolverAndMain({ "print-token": new Error("boom: exit code 1") });
+      const execute = registerAndCapture({
+        name: "non-secret-failure-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-token" } },
+      });
+
+      await expect(execute("call-1", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        /boom: exit code 1/,
+      );
+    });
+
+    it("redacts a secret { env } binding's resolved value from the main command", async () => {
+      process.env.ARMORY_TEST_SECRET = "super-secret-value";
       mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture(envTool);
+      const execute = registerAndCapture({
+        name: "secret-host-env-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { env: "ARMORY_TEST_SECRET", secret: true } },
+      });
 
       await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
 
       const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.redact).toBeUndefined();
-      delete process.env.ARMORY_TEST_FWD;
+      expect(opts?.extraEnv).toEqual({ TOKEN: "super-secret-value" });
+      expect(opts?.redact).toEqual(["super-secret-value"]);
+      delete process.env.ARMORY_TEST_SECRET;
     });
 
-    it("does not set extraEnv when env is empty object", async () => {
+    it("redacts a secret { command } binding's resolved value from the main command", async () => {
+      mockResolverAndMain({ "print-token": "secret-output" });
+      const execute = registerAndCapture({
+        name: "secret-command-tool",
+        command: "echo hi",
+        description: "test",
+        env: { TOKEN: { command: "print-token", secret: true } },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const mainOpts = mockExecuteCommand.mock.calls[1][1];
+      expect(mainOpts?.extraEnv).toEqual({ TOKEN: "secret-output" });
+      expect(mainOpts?.redact).toEqual(["secret-output"]);
+    });
+
+    it("resolves a mix of literal, host env, and command bindings independently", async () => {
+      process.env.ARMORY_TEST_MIXED = "host-value";
+      mockResolverAndMain({ "print-token": "command-value" });
+      const execute = registerAndCapture({
+        name: "mixed-tool",
+        command: "echo hi",
+        description: "test",
+        env: {
+          PUBLIC: "literal-value",
+          HOST: { env: "ARMORY_TEST_MIXED" },
+          SECRET: { command: "print-token", secret: true },
+        },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const mainOpts = mockExecuteCommand.mock.calls[1][1];
+      expect(mainOpts?.extraEnv).toEqual({
+        PUBLIC: "literal-value",
+        HOST: "host-value",
+        SECRET: "command-value",
+      });
+      expect(mainOpts?.redact).toEqual(["command-value"]);
+      delete process.env.ARMORY_TEST_MIXED;
+    });
+
+    it("does not expose resolved bindings to resolver commands via extraEnv", async () => {
+      process.env.ARMORY_TEST_MIXED2 = "host-value-2";
+      mockResolverAndMain({ "print-token": "command-value-2" });
+      const execute = registerAndCapture({
+        name: "isolated-resolvers-tool",
+        command: "echo hi",
+        description: "test",
+        env: {
+          HOST: { env: "ARMORY_TEST_MIXED2" },
+          COMMAND: { command: "print-token" },
+        },
+      });
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const resolverCall = mockExecuteCommand.mock.calls.find(([cmd]) => cmd === "print-token");
+      expect(resolverCall?.[1]?.extraEnv).toBeUndefined();
+      delete process.env.ARMORY_TEST_MIXED2;
+    });
+
+    it("returns no extraEnv/redact when env is absent", async () => {
+      mockExecuteCommand.mockResolvedValue("ok");
+      const execute = registerAndCapture(baseTool);
+
+      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
+
+      const opts = mockExecuteCommand.mock.calls[0][1];
+      expect(opts?.extraEnv).toBeUndefined();
+      expect(opts?.redact).toBeUndefined();
+    });
+
+    it("returns no extraEnv/redact when env is an empty object", async () => {
       mockExecuteCommand.mockResolvedValue("ok");
       const execute = registerAndCapture({
-        name: "empty-env",
+        name: "empty-env-tool",
         command: "echo hi",
         description: "test",
         env: {},
@@ -340,65 +448,7 @@ describe("registerArmoryTool", () => {
 
       const opts = mockExecuteCommand.mock.calls[0][1];
       expect(opts?.extraEnv).toBeUndefined();
-    });
-
-    it("escapes $$ to a literal dollar sign", async () => {
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture({
-        name: "escape-tool",
-        command: "echo hi",
-        description: "test",
-        env: { PRICE: "$$9.99", PREFIX: "$$HOME/local" },
-      });
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toEqual({ PRICE: "$9.99", PREFIX: "$HOME/local" });
-    });
-
-    it("skips env keys that secrets also define (secrets win)", async () => {
-      mockFetchSecret.mockImplementation(async (account) => `secret-${account}`);
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture({
-        name: "overlap-tool",
-        command: "deploy",
-        description: "test",
-        env: { SERVER: "https://example.com", TOKEN: "$NONEXISTENT_VAR" },
-        secrets: { TOKEN: "token-account" },
-      });
-
-      // Should NOT throw despite $NONEXISTENT_VAR being unset,
-      // because TOKEN is skipped (secrets take precedence)
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toEqual({
-        SERVER: "https://example.com",
-        TOKEN: "secret-token-account",
-      });
-      expect(opts?.redact).toContain("secret-token-account");
-    });
-
-    it("merges env and secrets into extraEnv with secrets winning on conflict", async () => {
-      mockFetchSecret.mockImplementation(async (account) => `secret-${account}`);
-      mockExecuteCommand.mockResolvedValue("ok");
-      const execute = registerAndCapture({
-        name: "both-tool",
-        command: "deploy",
-        description: "test",
-        env: { SERVER: "https://example.com", TOKEN: "overridden" },
-        secrets: { TOKEN: "token-account" },
-      });
-
-      await execute("call-1", {}, new AbortController().signal, undefined, makeCtx());
-
-      const opts = mockExecuteCommand.mock.calls[0][1];
-      expect(opts?.extraEnv).toEqual({
-        SERVER: "https://example.com",
-        TOKEN: "secret-token-account",
-      });
-      expect(opts?.redact).toContain("secret-token-account");
+      expect(opts?.redact).toBeUndefined();
     });
   });
 });

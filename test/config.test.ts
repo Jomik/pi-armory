@@ -340,7 +340,11 @@ describe("schema validation", () => {
       description: "Full tool",
       requires_approval: true,
       guidelines: ["Be careful"],
-      secrets: { API_KEY: "keychain:api-key" },
+      env: {
+        PUBLIC: "literal-value",
+        HOST: { env: "SOME_HOST_VAR" },
+        SECRET: { command: "print-secret", secret: true },
+      },
     };
     await writeGlobal([tool as ArmoryTool]);
     const result = await loadConfig(projectRoot, fakeAgentDir);
@@ -366,6 +370,52 @@ describe("schema validation", () => {
     await writeFile(
       path.join(fakeAgentDir, "armory.json"),
       JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", when: "svn" }] }, null, 2),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects an env binding object with both env and command keys", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        {
+          tools: [
+            {
+              name: "t",
+              command: "echo",
+              description: "d",
+              env: { TOKEN: { env: "FOO", command: "echo hi" } },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects an env binding object with an unknown key", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        {
+          tools: [
+            {
+              name: "t",
+              command: "echo",
+              description: "d",
+              env: { TOKEN: { env: "FOO", extra: true } },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
     );
     const result = await loadConfig(projectRoot, fakeAgentDir);
     expect(result.tools).toEqual([]);

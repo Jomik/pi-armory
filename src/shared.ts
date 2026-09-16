@@ -75,7 +75,7 @@ export function formatParamValue(value: unknown): string {
   return String(value ?? "");
 }
 
-export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTool, "env" | "secrets">): ArmoryTool {
+export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTool, "env">): ArmoryTool {
   return {
     name: result.name,
     command: result.command,
@@ -83,7 +83,6 @@ export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTo
     ...(result.requiresApproval ? { requires_approval: true } : {}),
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
     ...(opts?.env ? { env: opts.env } : {}),
-    ...(opts?.secrets ? { secrets: opts.secrets } : {}),
     ...(result.when ? { when: result.when } : {}),
   };
 }

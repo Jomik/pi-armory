@@ -249,7 +249,7 @@ async function handleEdit(
     if (choice !== "Confirm") return; // user aborted — no changes applied
   }
 
-  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, secrets: tool.secrets });
+  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env });
   const sourceName = tool.name;
   const destName = updatedTool.name;
 

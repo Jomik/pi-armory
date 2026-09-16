@@ -6,7 +6,7 @@ import { Value } from "typebox/value";
 import type { ArmoryConfig, ArmoryTool } from "./schema.js";
 import { ArmoryConfigSchema } from "./schema.js";
 
-export type { ArmoryConfig, ArmoryTool } from "./schema.js";
+export type { ArmoryConfig, ArmoryTool, EnvBinding } from "./schema.js";
 export type PersistedToolSource = "project" | "global";
 export type ToolSource = PersistedToolSource | "session";
 

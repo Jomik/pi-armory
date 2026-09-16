@@ -14,7 +14,6 @@ vi.mock("../src/register-tool.js", async (importOriginal) => {
 vi.mock("../src/request-tool.js");
 vi.mock("../src/commands.js");
 vi.mock("../src/executor.js");
-vi.mock("../src/keychain.js");
 vi.mock("../src/repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/repository.js")>();
   return {
