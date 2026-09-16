@@ -221,7 +221,7 @@ A binding is one of:
 - `{ "env": "HOST_NAME", "secret"?: boolean }` — reads `process.env[HOST_NAME]` at execution time.
 - `{ "command": "...", "secret"?: boolean }` — runs a shell command and uses its trimmed stdout as the value.
 
-`secret: true` is only meaningful on the `env`/`command` source-object forms (literals are always public). When set, the resolved value is redacted from streamed output, final output, and error output of the main tool command whenever it is nonempty.
+`secret: true` is only meaningful on the `env`/`command` source-object forms (literals are always public). When set, the resolved value is redacted from the main tool command's output whenever it is nonempty. Whenever any binding's resolved secret value is nonempty, streaming updates for that invocation are suppressed entirely — to prevent a secret from being disclosed across chunk boundaries — and the caller receives only the final, fully redacted success or error output.
 
 ```json
 {
@@ -291,6 +291,7 @@ Armory has no secret store and no `/armory secrets` UI. For credentials, point a
 
 - stdout and stderr are merged into a single stream (same as `bash`)
 - Streamed to agent via `onUpdate` with throttling
+- If any active `secret: true` binding resolved to a nonempty value, `onUpdate` streaming is suppressed entirely for the invocation; only the final, fully redacted output is returned
 - Non-zero exit code: throw an Error with output + exit code (agent sees it as a tool failure)
 - Zero exit code: return combined output as text content (stderr included — not an error)
 - No truncation limits or timeouts initially

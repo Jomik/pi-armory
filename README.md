@@ -155,7 +155,7 @@ Tools can inject environment variables into their subprocess via the `env` field
 }
 ```
 
-Set `secret: true` on an `env`/`command` binding (not available on literals) to redact its resolved value — whenever nonempty — from streamed output, final output, and error output of the main command.
+Set `secret: true` on an `env`/`command` binding (not available on literals) to redact its resolved value — whenever nonempty — from the main command's output. Whenever any binding's resolved secret value is nonempty, streaming updates are suppressed entirely for that invocation (to avoid leaking a secret split across chunk boundaries); the caller only receives the final, fully redacted success or error output.
 
 Bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
 
@@ -165,7 +165,7 @@ If a host env var is missing, a resolver command fails, or a resolver's stdout i
 
 ### Output
 
-Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included.
+Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included. If any `secret: true` binding resolved to a nonempty value, streaming is suppressed for the invocation and only the final redacted output is returned.
 
 ## Extension interoperability
 
