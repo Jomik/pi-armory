@@ -3,9 +3,9 @@ import type { ArmoryTool, ToolSource } from "./config.js";
 import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
 import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "./keychain.js";
 import { handleOnboard } from "./onboard.js";
-import { approvalRegistry, registerArmoryTool, sessionRegistry } from "./register-tool.js";
+import { approvalRegistry, registerArmoryTool, sessionRegistry, toolRegistry } from "./register-tool.js";
 import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
-import { buildToolFromResult, showToolEditor } from "./shared.js";
+import { buildToolFromResult, showToolEditor, syncToolCondition } from "./shared.js";
 
 export interface ArmoryCommandDeps {
   tools: ArmoryTool[];
@@ -114,16 +114,28 @@ async function resolveToolWithSource(
   return loadToolWithSource(name, projectRoot);
 }
 
-async function restorePersistedToolIfAny(pi: ExtensionAPI, name: string, projectRoot: string): Promise<boolean> {
+async function restorePersistedToolIfAny(
+  pi: ExtensionAPI,
+  name: string,
+  projectRoot: string,
+  cwd: string,
+): Promise<boolean> {
   const found = await loadToolWithSource(name, projectRoot);
   if (!found) return false;
   registerArmoryTool(pi, found.tool);
+  syncToolCondition(pi, cwd, found.tool);
   return true;
 }
 
-async function deactivateToolUnlessPersisted(pi: ExtensionAPI, name: string, projectRoot: string): Promise<void> {
-  const restored = await restorePersistedToolIfAny(pi, name, projectRoot);
+async function deactivateToolUnlessPersisted(
+  pi: ExtensionAPI,
+  name: string,
+  projectRoot: string,
+  cwd: string,
+): Promise<void> {
+  const restored = await restorePersistedToolIfAny(pi, name, projectRoot, cwd);
   if (restored) return;
+  toolRegistry.delete(name);
   const active = pi.getActiveTools().filter((activeName) => activeName !== name);
   pi.setActiveTools(active);
 }
@@ -299,6 +311,7 @@ async function handleEdit(
       guidelines: tool.guidelines ?? [],
       requiresApproval: tool.requires_approval ?? false,
       destination: source,
+      when: tool.when,
     },
     deps.draftModelName,
   );
@@ -371,8 +384,11 @@ async function handleEdit(
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
   if (destName !== sourceName) {
-    await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot);
+    await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot, ctx.cwd);
   }
+
+  // Sync the (re)registered tool's active state with its condition for this workspace.
+  syncToolCondition(pi, ctx.cwd, updatedTool);
 
   ctx.ui.notify(`Tool '${updatedTool.name}' updated`, "info");
 }
@@ -431,7 +447,7 @@ async function handleDelete(
 
   // Clean up approval registry and deactivate unless a lower-precedence persisted tool is revealed.
   approvalRegistry.delete(tool.name);
-  await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot);
+  await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
 
   ctx.ui.notify(`Tool '${tool.name}' deleted`, "info");
 }

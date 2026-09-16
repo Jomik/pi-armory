@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
-import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
+import { buildToolFromResult, resolveModel, showToolEditor, syncToolCondition } from "./shared.js";
 
 export { extractPlaceholders } from "./shared.js";
 
@@ -106,6 +106,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           guidelines: drafted?.guidelines ?? [],
           requiresApproval: drafted?.requires_approval ?? false,
           destination: drafted?.destination ?? "session",
+          ...(drafted?.when ? { when: drafted.when } : {}),
         },
         draftModelName,
         {
@@ -151,6 +152,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       if (result.destination === "session") {
         sessionRegistry.set(tool.name, tool);
       }
+      syncToolCondition(pi, ctx.cwd, tool);
 
       return {
         content: [

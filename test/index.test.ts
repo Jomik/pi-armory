@@ -15,10 +15,18 @@ vi.mock("../src/request-tool.js");
 vi.mock("../src/commands.js");
 vi.mock("../src/executor.js");
 vi.mock("../src/keychain.js");
+vi.mock("../src/repository.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/repository.js")>();
+  return {
+    ...actual,
+    detectRepositoryType: vi.fn(actual.detectRepositoryType),
+  };
+});
 
 import { loadConfig, loadProjectToolNamesSync } from "../src/config.js";
 import factory from "../src/index.js";
-import { approvalRegistry, registerArmoryTool } from "../src/register-tool.js";
+import { approvalRegistry, registerArmoryTool, toolRegistry } from "../src/register-tool.js";
+import { detectRepositoryType } from "../src/repository.js";
 import { registerRequestTool } from "../src/request-tool.js";
 
 const toolA: ArmoryTool = { name: "tool-a", command: "echo a", description: "Tool A" };
@@ -49,6 +57,7 @@ describe("factory", () => {
   beforeEach(() => {
     vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: true });
     approvalRegistry.clear();
+    toolRegistry.clear();
   });
 
   afterEach(() => {
@@ -93,6 +102,140 @@ describe("factory", () => {
     vi.mocked(loadConfig).mockRejectedValue(new Error("config read failed"));
 
     await expect(factory(fakePi)).rejects.toThrow("config read failed");
+  });
+
+  describe("session_start active-tool filtering", () => {
+    function getSessionStartHandler() {
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePi.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      return call?.[1] as ((event: unknown, ctx: { cwd: string }) => unknown) | undefined;
+    }
+
+    const gitTool: ArmoryTool = { name: "git-tool", command: "echo git", description: "Git only", when: "git" };
+    const jjTool: ArmoryTool = { name: "jj-tool", command: "echo jj", description: "Jj only", when: "jj" };
+
+    it("registers a session_start handler", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: true });
+      await factory(fakePi);
+      expect(getSessionStartHandler()).toBeDefined();
+    });
+
+    it("removes bash when disableBash is true", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: true });
+      vi.mocked(detectRepositoryType).mockReturnValue(undefined);
+      await factory(fakePi);
+
+      const handler = getSessionStartHandler();
+      await handler?.({}, { cwd: "/tmp/proj" });
+
+      expect(fakePi.setActiveTools).toHaveBeenCalledWith(["read", "write", "edit"]);
+    });
+
+    it("keeps bash active when disableBash is false", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue(undefined);
+      await factory(fakePi);
+
+      const handler = getSessionStartHandler();
+      await handler?.({}, { cwd: "/tmp/proj" });
+
+      expect(fakePi.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit"]);
+    });
+
+    it("keeps unconditional tools active regardless of repository type", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [toolA], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue("git");
+      const fakePiWithTool = {
+        ...fakePi,
+        getActiveTools: () => ["bash", "read", "write", "edit", "tool-a"],
+        setActiveTools: vi.fn(),
+      } as unknown as Parameters<typeof factory>[0];
+      await factory(fakePiWithTool);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePiWithTool.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      const handler = call?.[1] as (event: unknown, ctx: { cwd: string }) => unknown;
+      await handler({}, { cwd: "/tmp/proj" });
+
+      expect(fakePiWithTool.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit", "tool-a"]);
+    });
+
+    it("removes a git-conditional tool when the workspace is a jj repository", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [gitTool, jjTool], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue("jj");
+      const fakePiWithTools = {
+        ...fakePi,
+        getActiveTools: () => ["bash", "read", "write", "edit", "git-tool", "jj-tool"],
+        setActiveTools: vi.fn(),
+      } as unknown as Parameters<typeof factory>[0];
+      await factory(fakePiWithTools);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePiWithTools.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      const handler = call?.[1] as (event: unknown, ctx: { cwd: string }) => unknown;
+      await handler({}, { cwd: "/tmp/proj" });
+
+      expect(fakePiWithTools.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit", "jj-tool"]);
+    });
+
+    it("re-enables a matching conditional tool that is not currently active", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [gitTool], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue("git");
+      const fakePiWithTool = {
+        ...fakePi,
+        getActiveTools: () => ["bash", "read", "write", "edit"],
+        setActiveTools: vi.fn(),
+      } as unknown as Parameters<typeof factory>[0];
+      await factory(fakePiWithTool);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePiWithTool.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      const handler = call?.[1] as (event: unknown, ctx: { cwd: string }) => unknown;
+      await handler({}, { cwd: "/tmp/proj" });
+
+      expect(fakePiWithTool.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit", "git-tool"]);
+    });
+
+    it("reconciles a runtime-registered conditional tool on a later session_start, not just the factory's initial tools", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue("jj");
+      const fakePiWithTool = {
+        ...fakePi,
+        getActiveTools: () => ["bash", "read", "write", "edit"],
+        setActiveTools: vi.fn(),
+      };
+
+      await factory(fakePiWithTool);
+
+      // Simulate a runtime registration (e.g. via /armory edit, request_tool, or session tool)
+      // that happens after factory setup but before a later session_start event.
+      registerArmoryTool(fakePiWithTool as never, jjTool);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePiWithTool.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      const handler = call?.[1] as (event: unknown, ctx: { cwd: string }) => unknown;
+      await handler({}, { cwd: "/tmp/proj" });
+
+      expect(fakePiWithTool.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit", "jj-tool"]);
+    });
+
+    it("treats a failed repository probe as a non-match, removing conditional tools without failing", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ tools: [gitTool, jjTool], draftModel: undefined, disableBash: false });
+      vi.mocked(detectRepositoryType).mockReturnValue(undefined);
+      const fakePiWithTools = {
+        ...fakePi,
+        getActiveTools: () => ["bash", "read", "write", "edit", "git-tool", "jj-tool"],
+        setActiveTools: vi.fn(),
+      } as unknown as Parameters<typeof factory>[0];
+      await expect(factory(fakePiWithTools)).resolves.not.toThrow();
+
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const call = (fakePiWithTools.on as any).mock.calls.find(([event]: [string]) => event === "session_start");
+      const handler = call?.[1] as (event: unknown, ctx: { cwd: string }) => unknown;
+      await expect(handler({}, { cwd: "/tmp/proj" })).resolves.not.toThrow();
+
+      expect(fakePiWithTools.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit"]);
+    });
   });
 
   describe("tool_call approval handler", () => {

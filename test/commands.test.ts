@@ -11,10 +11,12 @@ vi.mock("../src/config.js", () => ({
 vi.mock("../src/register-tool.js", () => {
   const sessionRegistry = new Map<string, ArmoryTool>();
   const approvalRegistry = new Map<string, ArmoryTool>();
+  const toolRegistry = new Map<string, ArmoryTool>();
   return {
     registerArmoryTool: vi.fn(),
     sessionRegistry,
     approvalRegistry,
+    toolRegistry,
   };
 });
 
@@ -25,6 +27,7 @@ vi.mock("../src/shared.js", () => ({
     description: result.description,
   })),
   showToolEditor: vi.fn(),
+  syncToolCondition: vi.fn(),
 }));
 
 vi.mock("../src/onboard.js", () => ({
@@ -42,8 +45,8 @@ import { type ArmoryCommandDeps, registerArmoryCommand } from "../src/commands.j
 import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
 import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "../src/keychain.js";
 import { handleOnboard } from "../src/onboard.js";
-import { approvalRegistry, registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
-import { buildToolFromResult, showToolEditor } from "../src/shared.js";
+import { approvalRegistry, registerArmoryTool, sessionRegistry, toolRegistry } from "../src/register-tool.js";
+import { buildToolFromResult, showToolEditor, syncToolCondition } from "../src/shared.js";
 
 const toolProject: ArmoryTool = {
   name: "run_tests",
@@ -81,6 +84,7 @@ function makeCtx(overrides: { selectResponses?: (string | null)[]; mode?: string
   const selectQueue = [...(overrides.selectResponses ?? [])];
   return {
     mode: overrides.mode ?? "tui",
+    cwd: "/project",
     ui: {
       notify: vi.fn(),
       select: vi.fn(async () => selectQueue.shift() ?? null),
@@ -99,6 +103,7 @@ describe("handleEdit", () => {
   beforeEach(() => {
     sessionRegistry.clear();
     approvalRegistry.clear();
+    toolRegistry.clear();
     vi.mocked(loadToolsWithSource).mockReset();
     vi.mocked(loadToolWithSource).mockReset();
     vi.mocked(saveConfig).mockResolvedValue(undefined);
@@ -528,12 +533,45 @@ describe("handleEdit", () => {
       undefined,
     );
   });
+
+  it("passes the persisted tool's when to the editor and persists/syncs the returned when", async () => {
+    const conditionedTool: ArmoryTool = {
+      name: "jj_only",
+      command: "jj st",
+      description: "Show jj status",
+      when: "jj",
+    };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: conditionedTool, source: "project" });
+    const updatedTool: ArmoryTool = { name: "jj_only", command: "jj st", description: "Show jj status", when: "jj" };
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "jj_only",
+      command: "jj st",
+      description: "Show jj status",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "project",
+      when: "jj",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue(updatedTool);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [conditionedTool] });
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit jj_only", ctx as never);
+
+    expect(showToolEditor).toHaveBeenCalledWith(ctx, expect.objectContaining({ when: "jj" }), undefined);
+    expect(saveConfig).toHaveBeenCalledWith(updatedTool, "project", "/project");
+    expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, updatedTool);
+  });
 });
 
 describe("handleDelete", () => {
   beforeEach(() => {
     sessionRegistry.clear();
     approvalRegistry.clear();
+    toolRegistry.clear();
     vi.mocked(loadToolsWithSource).mockReset();
     vi.mocked(loadToolWithSource).mockReset();
     vi.mocked(removeFromConfig).mockResolvedValue(undefined);
@@ -569,6 +607,21 @@ describe("handleDelete", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'session_tool' deleted", "info");
   });
 
+  it("deletes with no lower-precedence tool to restore — removes the name from toolRegistry", async () => {
+    sessionRegistry.set("session_tool", toolSession);
+    toolRegistry.set("session_tool", toolSession);
+    vi.mocked(loadToolWithSource).mockResolvedValueOnce(null);
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [] });
+    const ctx = makeCtx({ selectResponses: ["Delete"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("delete session_tool", ctx as never);
+
+    expect(toolRegistry.has("session_tool")).toBe(false);
+  });
+
   it("deletes a project tool — removes from config, deactivates, removes from deps.tools", async () => {
     vi.mocked(loadToolWithSource)
       .mockResolvedValueOnce({ tool: toolProject, source: "project" })
@@ -589,6 +642,27 @@ describe("handleDelete", () => {
     expect(deps.tools.find((t) => t.name === "run_tests")).toBeUndefined();
     expect(pi.setActiveTools).toHaveBeenCalledWith(expect.not.arrayContaining(["run_tests"]));
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' deleted", "info");
+  });
+
+  it("deleting a shadowing session tool reveals a lower-precedence persisted conditional tool and syncs its state", async () => {
+    const conditionedTool: ArmoryTool = {
+      name: "run_tests",
+      command: "jj st",
+      description: "Revealed persisted tool",
+      when: "jj",
+    };
+    sessionRegistry.set("run_tests", toolSession);
+    vi.mocked(loadToolWithSource).mockResolvedValueOnce({ tool: conditionedTool, source: "project" });
+
+    const pi = makePi();
+    const deps = makeDeps({ tools: [conditionedTool] });
+    const ctx = makeCtx({ selectResponses: ["Delete"] });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("delete run_tests", ctx as never);
+
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, conditionedTool);
+    expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, conditionedTool);
   });
 
   it("deletes a global tool — confirmation mentions global config", async () => {

@@ -31,10 +31,17 @@ export interface DraftOutput {
   requires_approval: boolean;
   guidelines: string[];
   destination: "project" | "global" | "session";
+  when?: "git" | "jj";
 }
 
 function parseDestination(value: unknown, fallback: DraftOutput["destination"]): DraftOutput["destination"] {
   return value === "session" || value === "project" || value === "global" ? value : fallback;
+}
+
+function parseWhen(value: unknown): DraftOutput["when"] {
+  if (value === undefined) return undefined;
+  if (value === "git" || value === "jj") return value;
+  throw new Error(`Invalid "when" value: ${JSON.stringify(value)}`);
 }
 
 const SYSTEM_PROMPT = `You are defining a shell-command tool for a coding agent's armory.
@@ -50,6 +57,7 @@ Otherwise, produce a tool definition with these fields:
 - requires_approval: true if destructive, mutates remote/external state, or incurs significant cost.
 - guidelines: ultra-short actionable hints (≤8 words each). Include at least one whenever the tool has parameters, prerequisites, side effects, safety concerns, sequencing requirements, or non-obvious constraints. Use [] only when none of those apply and the tool is genuinely self-explanatory.
 - destination: "session" for one-off tools only needed in the current conversation, "project" for repo-specific scripts/conventions, "global" for general-purpose tools usable in any project.
+- when: optional, closed, built-in repository condition. Only "git" or "jj" are valid values. Set it ONLY when the tool is genuinely specific to that repository type (e.g. a jj-only or git-only plumbing command). Omit the field entirely for tools that work equally well in both Git and Jujutsu workspaces (this is the common case).
 
 Placeholder syntax:
 - {{name}} — required single value (type "string")
@@ -133,6 +141,7 @@ export async function draftToolDefinition(
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : [],
         destination: parseDestination(obj.destination, "session"),
+        when: parseWhen(obj.when),
       };
     }
   } catch {
@@ -161,6 +170,8 @@ Given the current definition, optional original request context, and optional us
 Use the original request to preserve the user's intent and any provided command/script context while applying the latest user requirement.
 Follow the same field rules as the original (snake_case name, no cd, etc.).
 Allowed destinations are "session", "project", and "global".
+
+The optional "when" field is a closed, built-in repository condition. Only "git" or "jj" are valid values. To preserve the current "when" value, emit it again explicitly in your response. Omit the field entirely to clear it. Never emit any other value.
 
 Placeholder syntax in the command field:
 - {{name}} — required single value
@@ -244,6 +255,7 @@ export async function reviseDraftDefinition(
           ? obj.guidelines.filter((g): g is string => typeof g === "string")
           : input.current.guidelines,
         destination: parseDestination(obj.destination, input.current.destination),
+        when: parseWhen(obj.when),
       };
     }
   } catch {

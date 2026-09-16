@@ -61,6 +61,19 @@
               }
             },
             "description": "Secret environment variables stored in the macOS Keychain. Keys are env var names; values are keychain account names. Resolved values are redacted from all tool output."
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "git"
+              },
+              {
+                "type": "string",
+                "const": "jj"
+              }
+            ],
+            "description": "Restricts the tool to sessions whose workspace matches this repository type. \"jj\" requires a Jujutsu repository; \"git\" requires a Git repository that is not also a Jujutsu repository. Omit to make the tool available in every workspace."
           }
         }
       }

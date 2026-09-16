@@ -7,7 +7,7 @@ import type { CandidateRequest, DraftAuth, DraftInput, DraftOutput } from "./dra
 import { draftToolDefinition, generateCandidateRequests } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
-import { buildToolFromResult, resolveModel, showToolEditor } from "./shared.js";
+import { buildToolFromResult, resolveModel, showToolEditor, syncToolCondition } from "./shared.js";
 
 // ---------------------------------------------------------------------------
 // Project evidence gathering
@@ -226,6 +226,7 @@ async function processCandidate(
       guidelines: drafted.guidelines,
       requiresApproval: drafted.requires_approval,
       destination: drafted.destination,
+      when: drafted.when,
     },
     draftModelName,
     draftInput,
@@ -260,6 +261,7 @@ async function processCandidate(
   if (result.destination === "session") {
     sessionRegistry.set(tool.name, tool);
   }
+  syncToolCondition(pi, ctx.cwd, tool);
 
   return "registered";
 }

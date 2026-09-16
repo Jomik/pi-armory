@@ -205,7 +205,15 @@ export const approvalRegistry = new Map<string, ArmoryTool>();
 /** In-memory registry of session-only tools (not persisted to config). */
 export const sessionRegistry = new Map<string, ArmoryTool>();
 
+/**
+ * Latest effective ArmoryTool definition for every registered tool name, updated by
+ * registerArmoryTool. Used to reconcile conditional tools against the current state
+ * (including runtime-created/edited/session tools) rather than a stale initial snapshot.
+ */
+export const toolRegistry = new Map<string, ArmoryTool>();
+
 export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
+  toolRegistry.set(tool.name, tool);
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
   } else {

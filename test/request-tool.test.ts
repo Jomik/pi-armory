@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ArmoryTool } from "../src/config.js";
 import { extractPlaceholders, normalizeName, VALID_NAME } from "../src/request-tool.js";
-import { parsePlaceholders } from "../src/shared.js";
+import { buildToolFromResult, parsePlaceholders, syncToolCondition } from "../src/shared.js";
+import type { ToolFormResult } from "../src/tool-form.js";
 
 describe("extractPlaceholders", () => {
   it("returns empty array for a command with no placeholders", () => {
@@ -221,5 +226,80 @@ describe("VALID_NAME", () => {
 
   it("rejects an empty string", () => {
     expect(VALID_NAME.test("")).toBe(false);
+  });
+});
+
+describe("buildToolFromResult", () => {
+  const baseResult: ToolFormResult = {
+    name: "jj_status",
+    command: "jj st",
+    description: "Show jj status",
+    guidelines: [],
+    requiresApproval: false,
+    destination: "session",
+  };
+
+  it("preserves the when condition on the built tool", () => {
+    const tool = buildToolFromResult({ ...baseResult, when: "jj" });
+    expect(tool.when).toBe("jj");
+  });
+
+  it("omits when when absent from the result", () => {
+    const tool = buildToolFromResult(baseResult);
+    expect("when" in tool).toBe(false);
+  });
+});
+
+describe("syncToolCondition", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), "pi-armory-sync-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  function makePi(active: string[]) {
+    return { getActiveTools: vi.fn(() => active), setActiveTools: vi.fn() };
+  }
+
+  it("activates only the target tool when its condition matches, leaving others untouched", async () => {
+    await mkdir(path.join(tmpDir, ".git"), { recursive: true });
+    const pi = makePi(["other_tool"]);
+    const tool: ArmoryTool = { name: "git_only", command: "git status", description: "d", when: "git" };
+
+    syncToolCondition(pi as never, tmpDir, tool);
+
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["other_tool", "git_only"]);
+  });
+
+  it("activates only the target tool when it is unconditional, leaving others untouched", async () => {
+    const pi = makePi(["other_tool"]);
+    const tool: ArmoryTool = { name: "always_tool", command: "echo hi", description: "d" };
+
+    syncToolCondition(pi as never, tmpDir, tool);
+
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["other_tool", "always_tool"]);
+  });
+
+  it("deactivates only the target tool on mismatch, leaving others untouched", async () => {
+    await mkdir(path.join(tmpDir, ".git"), { recursive: true });
+    const pi = makePi(["other_tool", "jj_only"]);
+    const tool: ArmoryTool = { name: "jj_only", command: "jj st", description: "d", when: "jj" };
+
+    syncToolCondition(pi as never, tmpDir, tool);
+
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["other_tool"]);
+  });
+
+  it("does nothing when the tool is already active and matching", () => {
+    const pi = makePi(["always_tool"]);
+    const tool: ArmoryTool = { name: "always_tool", command: "echo hi", description: "d" };
+
+    syncToolCondition(pi as never, tmpDir, tool);
+
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 });

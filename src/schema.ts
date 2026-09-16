@@ -22,6 +22,14 @@ const ArmoryToolSchema = Type.Object({
         "Resolved values are redacted from all tool output.",
     }),
   ),
+  when: Type.Optional(
+    Type.Union([Type.Literal("git"), Type.Literal("jj")], {
+      description:
+        "Restricts the tool to sessions whose workspace matches this repository type. " +
+        '"jj" requires a Jujutsu repository; "git" requires a Git repository that is not also a Jujutsu repository. ' +
+        "Omit to make the tool available in every workspace.",
+    }),
+  ),
 });
 
 export const ArmoryConfigSchema = Type.Object({
