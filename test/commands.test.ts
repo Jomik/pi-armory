@@ -107,6 +107,23 @@ describe("handleEdit", () => {
     vi.clearAllMocks();
   });
 
+  it("notifies and returns early when ctx.mode is not 'tui' — no showToolEditor/model/persistence work", async () => {
+    const pi = makePi();
+    const deps = makeDeps();
+    const ctx = makeCtx({ mode: "rpc" });
+    registerArmoryCommand(pi as never, deps);
+    const handler = getHandler(pi);
+    await handler("edit run_tests", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("TUI"), "error");
+    expect(showToolEditor).not.toHaveBeenCalled();
+    expect(loadToolWithSource).not.toHaveBeenCalled();
+    expect(loadToolsWithSource).not.toHaveBeenCalled();
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+  });
+
   it("edits a session tool staying session — no confirmation, updates registry", async () => {
     sessionRegistry.set("session_tool", toolSession);
     const updatedTool = { name: "session_tool", command: "echo updated", description: "updated" };
