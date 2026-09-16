@@ -93,4 +93,32 @@ describe("executeCommand", () => {
     // Final update should contain all output
     expect(updates[updates.length - 1]).toContain("line1");
   });
+
+  describe("stdoutOnly", () => {
+    it("excludes stderr from the resolved value on success", async () => {
+      const result = await executeCommand("echo err-text >&2 && echo out-text", {
+        cwd: process.cwd(),
+        stdoutOnly: true,
+      });
+      expect(result).toContain("out-text");
+      expect(result).not.toContain("err-text");
+    });
+
+    it("preserves useful stderr context in the thrown error on failure", async () => {
+      await expect(
+        executeCommand("echo err-text >&2 && exit 1", {
+          cwd: process.cwd(),
+          stdoutOnly: true,
+        }),
+      ).rejects.toThrow(/err-text/);
+    });
+
+    it("does not affect default (combined) behavior when omitted", async () => {
+      const result = await executeCommand("echo err-text >&2 && echo out-text", {
+        cwd: process.cwd(),
+      });
+      expect(result).toContain("out-text");
+      expect(result).toContain("err-text");
+    });
+  });
 });

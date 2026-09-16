@@ -272,9 +272,11 @@ describe("registerArmoryTool", () => {
       const resolverOpts = mockExecuteCommand.mock.calls[0][1];
       expect(resolverOpts?.onUpdate).toBeUndefined();
       expect(resolverOpts?.extraEnv).toBeUndefined();
+      expect(resolverOpts?.stdoutOnly).toBe(true);
 
       const mainOpts = mockExecuteCommand.mock.calls[1][1];
       expect(mainOpts?.extraEnv).toEqual({ TOKEN: "resolved-token" });
+      expect(mainOpts?.stdoutOnly).toBeUndefined();
     });
 
     it("throws when a { command } binding produces empty (or whitespace-only) output", async () => {

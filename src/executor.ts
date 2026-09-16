@@ -18,6 +18,15 @@ export interface ExecuteOptions {
   onUpdate?: (content: string) => void;
   extraEnv?: Record<string, string>;
   redact?: string[];
+  /**
+   * When true, a successful call resolves with stdout only (stderr is
+   * excluded from the resolved value). Default behavior (false or omitted)
+   * resolves with combined stdout+stderr, unchanged.
+   *
+   * On failure, behavior is unaffected: the rejection error always includes
+   * combined stdout+stderr context regardless of this option.
+   */
+  stdoutOnly?: boolean;
 }
 
 function applyRedaction(text: string, redact?: string[]): string {
@@ -31,7 +40,7 @@ function applyRedaction(text: string, redact?: string[]): string {
 }
 
 export async function executeCommand(command: string, options: ExecuteOptions): Promise<string> {
-  const { cwd, signal, onUpdate, extraEnv, redact } = options;
+  const { cwd, signal, onUpdate, extraEnv, redact, stdoutOnly } = options;
 
   return new Promise<string>((resolve, reject) => {
     const proc = spawn("sh", ["-c", command], {
@@ -41,8 +50,10 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       detached: process.platform !== "win32",
     });
 
-    const decoder = new TextDecoder("utf-8");
-    let output = "";
+    const stdoutDecoder = new TextDecoder("utf-8");
+    const stderrDecoder = new TextDecoder("utf-8");
+    let stdoutOutput = "";
+    let combinedOutput = "";
     let lastFlushed = "";
     let settled = false;
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -51,9 +62,9 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       if (throttleTimer !== null || !onUpdate || settled) return;
       throttleTimer = setTimeout(() => {
         throttleTimer = null;
-        if (!settled && output !== lastFlushed) {
-          lastFlushed = output;
-          onUpdate(applyRedaction(output, redact));
+        if (!settled && combinedOutput !== lastFlushed) {
+          lastFlushed = combinedOutput;
+          onUpdate(applyRedaction(combinedOutput, redact));
         }
       }, 100);
     }
@@ -63,19 +74,27 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
         clearTimeout(throttleTimer);
         throttleTimer = null;
       }
-      if (onUpdate && output !== lastFlushed) {
-        lastFlushed = output;
-        onUpdate(applyRedaction(output, redact));
+      if (onUpdate && combinedOutput !== lastFlushed) {
+        lastFlushed = combinedOutput;
+        onUpdate(applyRedaction(combinedOutput, redact));
       }
     }
 
-    function handleData(chunk: Buffer) {
-      output += decoder.decode(chunk, { stream: true });
+    function handleStdout(chunk: Buffer) {
+      const text = stdoutDecoder.decode(chunk, { stream: true });
+      stdoutOutput += text;
+      combinedOutput += text;
       if (onUpdate) scheduleFlush();
     }
 
-    proc.stdout.on("data", handleData);
-    proc.stderr.on("data", handleData);
+    function handleStderr(chunk: Buffer) {
+      const text = stderrDecoder.decode(chunk, { stream: true });
+      combinedOutput += text;
+      if (onUpdate) scheduleFlush();
+    }
+
+    proc.stdout.on("data", handleStdout);
+    proc.stderr.on("data", handleStderr);
 
     proc.on("error", (err) => {
       if (settled) return;
@@ -124,14 +143,18 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       settled = true;
 
       // Flush any remaining decoder state
-      output += decoder.decode();
+      const remainingStdout = stdoutDecoder.decode();
+      const remainingStderr = stderrDecoder.decode();
+      stdoutOutput += remainingStdout;
+      combinedOutput += remainingStdout + remainingStderr;
       flushFinal();
 
       const exitCode = code ?? (killSignal ? 1 : 0);
       if (exitCode === 0) {
-        resolve(applyRedaction(output, redact));
+        const resultText = stdoutOnly ? stdoutOutput : combinedOutput;
+        resolve(applyRedaction(resultText, redact));
       } else {
-        reject(new Error(`${applyRedaction(output, redact)}\n\nCommand exited with code ${exitCode}`));
+        reject(new Error(`${applyRedaction(combinedOutput, redact)}\n\nCommand exited with code ${exitCode}`));
       }
     });
   });

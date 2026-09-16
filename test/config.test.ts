@@ -305,15 +305,28 @@ describe("schema validation", () => {
     expect(result.tools).toEqual([]);
   });
 
-  it("ignores unknown tool keys", async () => {
+  it("rejects unknown tool keys", async () => {
     await mkdir(fakeAgentDir, { recursive: true });
     await writeFile(
       path.join(fakeAgentDir, "armory.json"),
       JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", extra: true }] }, null, 2),
     );
     const result = await loadConfig(projectRoot, fakeAgentDir);
-    expect(result.tools).toHaveLength(1);
-    expect(result.tools[0].name).toBe("t");
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects a tool with a legacy 'secrets' field", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        { tools: [{ name: "t", command: "echo", description: "d", secrets: { TOKEN: "legacy-value" } }] },
+        null,
+        2,
+      ),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
   });
 
   it("rejects tool with wrong field type", async () => {

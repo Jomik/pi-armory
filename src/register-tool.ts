@@ -134,7 +134,8 @@ export function buildParamSchema(tool: ArmoryTool): TObject {
  * - A plain string is a public literal, used verbatim.
  * - `{ env }` reads a host environment variable.
  * - `{ command }` runs a shell command (via the tool's cwd/signal, no streaming) and
- *   uses its trimmed stdout.
+ *   uses its trimmed stdout only — stderr is captured for failure context but never
+ *   contaminates the resolved value.
  *
  * Resolver commands are independent: they never see previously resolved bindings.
  */
@@ -161,7 +162,7 @@ async function resolveBinding(
   // { command }
   let output: string;
   try {
-    output = await executeCommand(binding.command, { cwd: ctx.cwd, signal: ctx.signal });
+    output = await executeCommand(binding.command, { cwd: ctx.cwd, signal: ctx.signal, stdoutOnly: true });
   } catch (err) {
     if (binding.secret) {
       throw new Error(`Failed to resolve secret environment binding 'env.${envVar}'.`);

@@ -25,6 +25,7 @@
           "command",
           "description"
         ],
+        "additionalProperties": false,
         "properties": {
           "name": {
             "type": "string"
