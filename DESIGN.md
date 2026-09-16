@@ -213,7 +213,15 @@ This approach prevents injection by containing every value in single quotes rega
 
 ## Environment variables
 
-Tools can declare non-secret environment variables via `env: Record<string, string>`. Keys are env var names injected into the subprocess; values are either static strings or `$VAR` references.
+Tools can declare an `env: Record<string, EnvBinding>` map. Keys are env var names injected into the subprocess. There is no separate `secrets` field — every binding is expressed through `env`, and any binding can be marked secret.
+
+A binding is one of:
+
+- A plain string — a **public literal**, injected verbatim (never redacted).
+- `{ "env": "HOST_NAME", "secret"?: boolean }` — reads `process.env[HOST_NAME]` at execution time.
+- `{ "command": "...", "secret"?: boolean }` — runs a shell command and uses its trimmed stdout as the value.
+
+`secret: true` is only meaningful on the `env`/`command` source-object forms (literals are always public). When set, the resolved value is redacted from streamed output, final output, and error output of the main tool command whenever it is nonempty.
 
 ```json
 {
@@ -222,39 +230,26 @@ Tools can declare non-secret environment variables via `env: Record<string, stri
   "description": "Deploy",
   "env": {
     "SERVER_URL": "https://deploy.example.com",
-    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK",
-    "PRICE": "$$9.99"
+    "GITHUB_TOKEN": { "command": "gh auth token", "secret": true },
+    "API_TOKEN": {
+      "command": "security find-generic-password -s pi-armory -a api-token -w",
+      "secret": true
+    }
   }
 }
 ```
 
-### Value resolution
+### Resolution
 
-- Static string (no `$` prefix): injected verbatim
-- `$NAME`: resolved from `process.env[NAME]` at execution time; throws if not set
-- `$$...`: escaped literal — leading `$$` becomes `$` (use for values that start with a dollar sign)
+- Bindings are resolved once per invocation, before the main command runs, in the tool's `cwd`, using the same cancellation signal as the main command.
+- `{ command }` bindings use trimmed stdout only — stderr is excluded from a successful resolution (it may still appear in error diagnostics on failure).
+- Bindings are resolved independently: a resolver command does not receive values produced by other bindings, and bindings cannot reference each other.
+- Resolution failures prevent the main command from running: a missing host env var, a resolver command that fails, or a resolver whose stdout is empty or all-whitespace all abort execution before the main command starts.
+- When a failing binding is marked `secret: true`, the reported error is generic (it names the binding, not the underlying command output or exit details) so resolver output and diagnostics are never leaked. Non-secret binding failures retain full diagnostics (the resolver's error message/output) to aid debugging.
 
-### Visibility
+### Credentials are provider-managed
 
-**`env` values are NOT redacted from tool output.** If a resolved value appears in the subprocess's stdout/stderr, it will be visible to the LLM. Do not use `env` for credentials or tokens — use `secrets` instead.
-
-### Interaction with secrets
-
-When both `env` and `secrets` define the same key:
-- The `env` entry is skipped entirely (no resolution, no error if `$VAR` is unset)
-- The `secrets` value wins and is redacted from output
-
-This allows a tool to declare a fallback in `env` that a user can override with a secret without breaking the config.
-
-## Secrets
-
-Tools can reference secrets via `secrets: Record<string, string>` where keys are environment variable names and values are macOS Keychain account identifiers (stored under service "pi-armory").
-
-- At execution time, secrets are fetched from keychain and injected as environment variables
-- Secret values are redacted from all tool output (both streamed updates and final result)
-- `/armory secrets` opens a select menu to manage stored keychain entries (account list → status/action menu for set/update or delete). Setting or updating a value is collected by a local macOS `osascript` hidden-answer dialog (native, not a Pi dialog), so the secret value itself never traverses Pi's UI layer or transcript. That value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may briefly be visible to local process inspection (e.g. `ps`) during that call
-- Secrets and `/armory secrets` are macOS-only: they depend on the macOS Keychain (`security`) and a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop able to display dialogs). There is no cross-platform fallback
-- If a secret is missing from keychain at execution time, the fetch throws an error
+Armory has no secret store and no `/armory secrets` UI. For credentials, point a `command` binding at whatever the credential's own provider or CLI offers for reading it back out — for example `gh auth token` for GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored in the macOS Keychain yourself. Users manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
 1. Agent calls `request_tool` with `{ command, reasoning, context? }`
    - If the TUI is unavailable, the request is rejected before drafting or persistence

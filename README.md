@@ -133,7 +133,11 @@ Edits are schema-validated; once valid, the view returns to the approval panel b
 
 ### Environment variables
 
-Tools can inject environment variables into their subprocess via the `env` field:
+Tools can inject environment variables into their subprocess via the `env` field. There's one `env` map — no separate `secrets` field. Each value is a binding:
+
+- A plain string — a **public literal**, used verbatim.
+- `{ "env": "HOST_NAME", "secret"?: boolean }` — reads a host environment variable.
+- `{ "command": "...", "secret"?: boolean }` — runs a shell command and uses its trimmed stdout.
 
 ```json
 {
@@ -142,32 +146,22 @@ Tools can inject environment variables into their subprocess via the `env` field
   "description": "Deploy to target environment",
   "env": {
     "SERVER_URL": "https://deploy.example.com",
-    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK"
+    "GITHUB_TOKEN": { "command": "gh auth token", "secret": true },
+    "API_TOKEN": {
+      "command": "security find-generic-password -s pi-armory -a api-token -w",
+      "secret": true
+    }
   }
 }
 ```
 
-Values support three forms:
-- **Static** - `"https://..."` passed as-is
-- **Reference** - `"$VAR"` resolved from the host process environment at execution time; throws if not set
-- **Escaped** - `"$$literal"` becomes `"$literal"` (use `$$` to escape a leading dollar sign)
+Set `secret: true` on an `env`/`command` binding (not available on literals) to redact its resolved value — whenever nonempty — from streamed output, final output, and error output of the main command.
 
-> **⚠️ `env` values are visible in tool output shown to the LLM.** Do not put secrets here. Use the `secrets` field for sensitive values - those are stored in the macOS Keychain and redacted from all output.
+Bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
 
-Secrets and `/armory secrets` are macOS-only: storage uses the macOS Keychain (`security`) and the set/update prompt uses a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop session able to display dialogs). There is no cross-platform fallback; on other platforms or headless/non-GUI sessions, secrets management is unavailable.
+If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Failures on `secret: true` bindings are reported generically, without leaking resolver output or diagnostics; failures on non-secret bindings keep their full diagnostic detail.
 
-When both `env` and `secrets` define the same key, secrets take precedence and the env entry is skipped.
-
-#### Managing secrets
-
-`/armory secrets` walks a native select-menu flow to manage Keychain-backed secrets:
-
-1. An account list menu shows each configured secret account and whether it's currently found in the Keychain.
-2. Selecting an account opens a status/action menu (`Set/update`, `Delete` if present, `Back`).
-3. **Set/update** collects the value via a local macOS `osascript` hidden-answer dialog (a native system dialog, not a Pi dialog) - the value never traverses the Pi/Paseo UI or transcript, only the resulting save/failure notification is. However, the value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may be visible to local process inspection (e.g. `ps`) for the brief duration of that call.
-4. **Delete** requires a native confirm/cancel selection before removing the entry.
-
-Storage (macOS Keychain, service `pi-armory`) and output redaction are unchanged by the UI used to manage entries.
+> **No built-in secret store.** Armory has no secrets store and no `/armory secrets` UI. Use a `command` binding that calls your credential's own provider or CLI — e.g. `gh auth token` for the GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored yourself in the macOS Keychain. You manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
 ### Output
 
