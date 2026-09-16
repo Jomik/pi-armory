@@ -159,7 +159,7 @@ Set `secret: true` on an `env`/`command` binding (not available on literals) to 
 
 Bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
 
-If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Failures on `secret: true` bindings are reported generically, without leaking resolver output or diagnostics; failures on non-secret bindings keep their full diagnostic detail.
+If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Generic failure suppression for `secret: true` bindings applies specifically to a failing `{ command }` resolver: the error is reported without leaking resolver output or diagnostics. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Failures on non-secret bindings keep their full diagnostic detail.
 
 > **No built-in secret store.** Armory has no secrets store and no `/armory secrets` UI. Use a `command` binding that calls your credential's own provider or CLI — e.g. `gh auth token` for the GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored yourself in the macOS Keychain. You manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 

@@ -245,7 +245,7 @@ A binding is one of:
 - `{ command }` bindings use trimmed stdout only — stderr is excluded from a successful resolution (it may still appear in error diagnostics on failure).
 - Bindings are resolved independently: a resolver command does not receive values produced by other bindings, and bindings cannot reference each other.
 - Resolution failures prevent the main command from running: a missing host env var, a resolver command that fails, or a resolver whose stdout is empty or all-whitespace all abort execution before the main command starts.
-- When a failing binding is marked `secret: true`, the reported error is generic (it names the binding, not the underlying command output or exit details) so resolver output and diagnostics are never leaked. Non-secret binding failures retain full diagnostics (the resolver's error message/output) to aid debugging.
+- Generic failure suppression only applies to a failing `{ command }` resolver marked `secret: true`: the reported error is generic (it names the binding, not the underlying command output or exit details) so resolver output and diagnostics are never leaked. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Non-secret binding failures retain full diagnostics (the resolver's error message/output) to aid debugging.
 
 ### Credentials are provider-managed
 
