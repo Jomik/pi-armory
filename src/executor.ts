@@ -31,12 +31,20 @@ export interface ExecuteOptions {
 
 function applyRedaction(text: string, redact?: string[]): string {
   if (!redact || redact.length === 0) return text;
+  const uniqueSecrets = Array.from(new Set(redact.filter((secret) => !!secret)));
+  // Process longest-first so overlapping secrets (e.g. "abc" and "abcdef")
+  // don't leave remnants of a longer secret visible after a shorter one is
+  // redacted first.
+  uniqueSecrets.sort((a, b) => b.length - a.length);
   let result = text;
-  for (const secret of redact) {
-    if (!secret) continue;
+  for (const secret of uniqueSecrets) {
     result = result.split(secret).join("[REDACTED]");
   }
   return result;
+}
+
+function hasEffectiveRedact(redact?: string[]): boolean {
+  return !!redact && redact.some((secret) => !!secret);
 }
 
 export async function executeCommand(command: string, options: ExecuteOptions): Promise<string> {
@@ -57,9 +65,13 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
     let lastFlushed = "";
     let settled = false;
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+    // When there is at least one nonempty secret to redact, streaming updates
+    // are suppressed entirely to avoid disclosing a secret split across
+    // chunk boundaries. Final success/error output remains fully redacted.
+    const suppressUpdates = hasEffectiveRedact(redact);
 
     function scheduleFlush() {
-      if (throttleTimer !== null || !onUpdate || settled) return;
+      if (throttleTimer !== null || !onUpdate || settled || suppressUpdates) return;
       throttleTimer = setTimeout(() => {
         throttleTimer = null;
         if (!settled && combinedOutput !== lastFlushed) {
@@ -74,7 +86,7 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
         clearTimeout(throttleTimer);
         throttleTimer = null;
       }
-      if (onUpdate && combinedOutput !== lastFlushed) {
+      if (onUpdate && !suppressUpdates && combinedOutput !== lastFlushed) {
         lastFlushed = combinedOutput;
         onUpdate(applyRedaction(combinedOutput, redact));
       }

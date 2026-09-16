@@ -80,6 +80,28 @@ describe("executeCommand", () => {
     expect(result.trim()).toBe("hello");
   });
 
+  it("fully redacts overlapping secrets regardless of order (longest-first)", async () => {
+    const result = await executeCommand("echo abcdef", {
+      cwd: process.cwd(),
+      redact: ["abc", "abcdef"],
+    });
+    expect(result).not.toContain("def");
+    expect(result).not.toContain("abcdef");
+    expect(result).toContain("[REDACTED]");
+  });
+
+  it("suppresses onUpdate entirely when an effective redact value is present", async () => {
+    const updates: string[] = [];
+    const result = await executeCommand("echo supersecret && sleep 0.15 && echo line2", {
+      cwd: process.cwd(),
+      redact: ["supersecret"],
+      onUpdate: (content) => updates.push(content),
+    });
+    expect(updates).toHaveLength(0);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("supersecret");
+  });
+
   it("calls onUpdate with progressive output", async () => {
     const updates: string[] = [];
     const result = await executeCommand("echo line1 && sleep 0.15 && echo line2", {
