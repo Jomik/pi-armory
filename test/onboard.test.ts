@@ -418,7 +418,7 @@ describe("handleOnboard — per-candidate flow", () => {
       description: "Run tests",
       envFrom: ["common"],
     });
-    sessionRegistry.set("run_tests", { name: "old" });
+    sessionRegistry.set("run_tests", { name: "old", command: "echo old", description: "Old tool" });
     const pi = makePi();
     const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
     await expect(handleOnboard(pi as never, ctx as never, "/project", "provider:model")).rejects.toThrow(
@@ -438,7 +438,7 @@ describe("handleOnboard — per-candidate flow", () => {
       { common: { TOKEN: "value" } },
     );
     expect(registerArmoryTool).not.toHaveBeenCalled();
-    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old" });
+    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old", command: "echo old", description: "Old tool" });
     expect(syncToolCondition).not.toHaveBeenCalled();
   });
 

@@ -280,7 +280,7 @@ describe("request_tool session destination", () => {
 
   it("isolates an invalid unrelated scope and does not allow a failed save to mutate registries", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
-    sessionRegistry.set("run_tests", { name: "old" });
+    sessionRegistry.set("run_tests", { name: "old", command: "echo old", description: "Old tool" });
     vi.mocked(getDestinationEnvSets).mockImplementation(async (scope) => {
       if (scope === "global") throw new Error("Invalid config");
       return { common: { TOKEN: "value" } };
@@ -330,7 +330,7 @@ describe("request_tool session destination", () => {
       { common: { TOKEN: "value" } },
     );
     expect(registerArmoryTool).not.toHaveBeenCalled();
-    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old" });
+    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old", command: "echo old", description: "Old tool" });
     expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 
