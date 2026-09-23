@@ -3,7 +3,7 @@ import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { type TObject, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import type { ArmoryTool, EnvBinding } from "./config.js";
+import { type ArmoryTool, type EnvBinding, type EnvSets, validateEffectiveBindings } from "./config.js";
 import { executeCommand } from "./executor.js";
 import { FLAG_PLACEHOLDER_RE, formatParamValue, parsePlaceholders } from "./shared.js";
 
@@ -182,16 +182,14 @@ async function resolveBinding(
  */
 async function resolveToolEnvironment(
   tool: ArmoryTool,
+  envSets: EnvSets,
   ctx: { cwd: string; signal?: AbortSignal },
 ): Promise<{ extraEnv?: Record<string, string>; redact?: string[] }> {
-  if (!tool.env || Object.keys(tool.env).length === 0) {
-    return {};
-  }
-
+  const bindings = validateEffectiveBindings(tool, envSets);
   const extraEnv: Record<string, string> = {};
   const redact: string[] = [];
 
-  for (const [envVar, binding] of Object.entries(tool.env)) {
+  for (const [envVar, binding] of Object.entries(bindings)) {
     const { value, secret } = await resolveBinding(envVar, binding, ctx);
     extraEnv[envVar] = value;
     if (secret) redact.push(value);
@@ -233,7 +231,7 @@ export const sessionRegistry = new Map<string, ArmoryTool>();
  */
 export const toolRegistry = new Map<string, ArmoryTool>();
 
-export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
+export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool, envSets: EnvSets = {}) {
   toolRegistry.set(tool.name, tool);
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
@@ -323,7 +321,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       }
 
       const command = interpolateCommand(tool.command, validated.value);
-      const { extraEnv, redact } = await resolveToolEnvironment(tool, { cwd: ctx.cwd, signal });
+      const { extraEnv, redact } = await resolveToolEnvironment(tool, envSets, { cwd: ctx.cwd, signal });
 
       const output = await executeCommand(command, {
         cwd: ctx.cwd,

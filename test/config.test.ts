@@ -129,6 +129,25 @@ describe("shared environment sets", () => {
     extra: { REGION: { command: "echo region" } },
   };
 
+  it("associates each winning raw tool with only its defining destination's sets", async () => {
+    const globalTool = { ...toolA, envFrom: ["shared"] };
+    const projectTool = { ...toolAOverride, envFrom: ["shared"] };
+    const globalSets = { shared: { GLOBAL: "global" } };
+    const projectSets = { shared: { PROJECT: "project" } };
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      globalPath(),
+      JSON.stringify({ tools: [globalTool, { ...toolB, envFrom: ["shared"] }], envSets: globalSets }),
+    );
+    await mkdir(path.dirname(projectPath()), { recursive: true });
+    await writeFile(projectPath(), JSON.stringify({ tools: [projectTool], envSets: projectSets }));
+
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([projectTool, { ...toolB, envFrom: ["shared"] }]);
+    expect(result.envSetsByTool).toEqual({ "tool-a": projectSets, "tool-b": globalSets });
+    expect(result.tools[0].env).toBeUndefined();
+  });
+
   it("loads mixed set and inline bindings without changing the tool definition or source precedence", async () => {
     const globalTool = { ...toolA, envFrom: ["common", "extra"], env: { INLINE: "value" }, when: "git" } as ArmoryTool;
     await mkdir(fakeAgentDir, { recursive: true });

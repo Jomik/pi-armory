@@ -118,13 +118,13 @@ async function writeConfigFile(filePath: string, config: ArmoryConfig): Promise<
 export async function loadConfig(
   projectRoot: string,
   agentDir: string = getAgentDir(),
-): Promise<{ tools: ArmoryTool[]; draftModel?: string; disableBash: boolean }> {
+): Promise<{ tools: ArmoryTool[]; envSetsByTool?: Record<string, EnvSets>; draftModel?: string; disableBash: boolean }> {
   const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
-  const merged = mergePersistedToolsWithSource(globalResult?.tools ?? [], projectResult?.tools ?? []);
+  const merged = mergePersistedToolsWithSource(globalResult, projectResult);
   const draftModel = projectResult?.draftModel ?? globalResult?.draftModel;
   const disableBash = globalResult?.disableBash ?? true;
 
@@ -132,21 +132,22 @@ export async function loadConfig(
     tools: Array.from(merged.values())
       .map(({ tool }) => tool)
       .sort((a, b) => a.name.localeCompare(b.name)),
+    envSetsByTool: Object.fromEntries(Array.from(merged, ([name, { envSets }]) => [name, envSets])),
     ...(draftModel !== undefined ? { draftModel } : {}),
     disableBash,
   };
 }
 
 function mergePersistedToolsWithSource(
-  globalTools: ArmoryTool[],
-  projectTools: ArmoryTool[],
-): Map<string, { tool: ArmoryTool; source: PersistedToolSource }> {
-  const merged = new Map<string, { tool: ArmoryTool; source: PersistedToolSource }>();
-  for (const tool of globalTools) {
-    merged.set(tool.name, { tool, source: "global" });
+  globalConfig: ArmoryConfig | null,
+  projectConfig: ArmoryConfig | null,
+): Map<string, { tool: ArmoryTool; source: PersistedToolSource; envSets: EnvSets }> {
+  const merged = new Map<string, { tool: ArmoryTool; source: PersistedToolSource; envSets: EnvSets }>();
+  for (const tool of globalConfig?.tools ?? []) {
+    merged.set(tool.name, { tool, source: "global", envSets: globalConfig?.envSets ?? {} });
   }
-  for (const tool of projectTools) {
-    merged.set(tool.name, { tool, source: "project" });
+  for (const tool of projectConfig?.tools ?? []) {
+    merged.set(tool.name, { tool, source: "project", envSets: projectConfig?.envSets ?? {} });
   }
   return merged;
 }
@@ -159,9 +160,11 @@ export async function loadToolsWithSource(
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
-  const merged = mergePersistedToolsWithSource(globalResult?.tools ?? [], projectResult?.tools ?? []);
+  const merged = mergePersistedToolsWithSource(globalResult, projectResult);
 
-  return Array.from(merged.values()).sort((a, b) => a.tool.name.localeCompare(b.tool.name));
+  return Array.from(merged.values())
+    .map(({ tool, source }) => ({ tool, source }))
+    .sort((a, b) => a.tool.name.localeCompare(b.tool.name));
 }
 
 export async function loadToolWithSource(

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ArmoryTool } from "../src/config.js";
+import type { ArmoryTool, EnvSets } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
 import { approvalRegistry, registerArmoryTool, toolRegistry } from "../src/register-tool.js";
 
@@ -32,14 +32,14 @@ function makeCtx(confirmResult = true) {
 /**
  * Registers a tool and returns the execute function captured from the pi mock.
  */
-function registerAndCapture(tool: ArmoryTool): ExecuteFn {
+function registerAndCapture(tool: ArmoryTool, envSets?: EnvSets): ExecuteFn {
   let captured: ExecuteFn | undefined;
   const pi = {
     registerTool: vi.fn((def: { execute: ExecuteFn }) => {
       captured = def.execute;
     }),
   } as unknown as ExtensionAPI;
-  registerArmoryTool(pi, tool);
+  registerArmoryTool(pi, tool, envSets);
   if (!captured) throw new Error("registerTool was not called");
   return captured;
 }
@@ -204,6 +204,60 @@ describe("registerArmoryTool", () => {
         return mainOutput;
       });
     }
+
+    it("assembles selected sets with inline bindings on each invocation without changing registered tools", async () => {
+      const tool: ArmoryTool = {
+        ...baseTool,
+        envFrom: ["common"],
+        env: { INLINE: "literal" },
+      };
+      const sets = { common: { HOST: { env: "ARMORY_SET_HOST" }, SECRET: { command: "get-secret", secret: true } } };
+      mockResolverAndMain({ "get-secret": "  private-token\n" });
+      const execute = registerAndCapture(tool, sets);
+      expect(toolRegistry.get(tool.name)).toBe(tool);
+      expect(toolRegistry.get(tool.name)?.env).toEqual({ INLINE: "literal" });
+      const signal = new AbortController().signal;
+      const onUpdate = vi.fn();
+      try {
+        process.env.ARMORY_SET_HOST = "first";
+        await execute("call-1", {}, signal, onUpdate, makeCtx());
+        process.env.ARMORY_SET_HOST = "second";
+        await execute("call-2", {}, signal, onUpdate, makeCtx());
+        const resolverCalls = mockExecuteCommand.mock.calls.filter(([cmd]) => cmd === "get-secret");
+        expect(resolverCalls).toHaveLength(2);
+        for (const [, opts] of resolverCalls) {
+          expect(opts).toEqual(expect.objectContaining({ cwd: "/test/cwd", signal, stdoutOnly: true }));
+          expect(opts?.extraEnv).toBeUndefined();
+          expect(opts?.onUpdate).toBeUndefined();
+        }
+        const mainCalls = mockExecuteCommand.mock.calls.filter(([cmd]) => cmd === tool.command);
+        expect(mainCalls.map(([, opts]) => opts?.extraEnv)).toEqual([
+          { HOST: "first", SECRET: "private-token", INLINE: "literal" },
+          { HOST: "second", SECRET: "private-token", INLINE: "literal" },
+        ]);
+        expect(mainCalls.map(([, opts]) => opts?.redact)).toEqual([["private-token"], ["private-token"]]);
+        expect(tool.env).toEqual({ INLINE: "literal" });
+      } finally {
+        delete process.env.ARMORY_SET_HOST;
+      }
+    });
+
+    it("fails before the main command for a missing set source and suppresses secret resolver failures", async () => {
+      const tool: ArmoryTool = { ...baseTool, envFrom: ["shared"] };
+      delete process.env.ARMORY_MISSING_SET_HOST;
+      const missing = registerAndCapture(tool, { shared: { KEY: { env: "ARMORY_MISSING_SET_HOST" } } });
+      await expect(missing("call", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        "ARMORY_MISSING_SET_HOST",
+      );
+      expect(mockExecuteCommand).not.toHaveBeenCalled();
+
+      mockResolverAndMain({ "secret-command": new Error("sensitive diagnostic") });
+      const failing = registerAndCapture(tool, { shared: { KEY: { command: "secret-command", secret: true } } });
+      await expect(failing("call", {}, new AbortController().signal, undefined, makeCtx())).rejects.toThrow(
+        "Failed to resolve secret environment binding 'env.KEY'",
+      );
+      expect(mockExecuteCommand).toHaveBeenCalledOnce();
+    });
 
     it("passes a string literal verbatim and does not redact it", async () => {
       mockExecuteCommand.mockResolvedValue("ok");
