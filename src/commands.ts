@@ -121,11 +121,13 @@ async function deactivateToolUnlessPersisted(
   projectRoot: string,
   cwd: string,
 ): Promise<void> {
-  const restored = await restorePersistedToolIfAny(pi, name, projectRoot, cwd);
-  if (restored) return;
-  toolRegistry.delete(name);
+  // Fail closed before any fallible restore lookup: a stale handler must not remain active
+  // after its approval gate is removed.
   const active = pi.getActiveTools().filter((activeName) => activeName !== name);
   pi.setActiveTools(active);
+  toolRegistry.delete(name);
+  approvalRegistry.delete(name);
+  await restorePersistedToolIfAny(pi, name, projectRoot, cwd);
 }
 
 /** Human-readable confirmation copy for scope changes. */
@@ -258,6 +260,9 @@ async function handleEdit(
   const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, envFrom: tool.envFrom });
   const sourceName = tool.name;
   const destName = updatedTool.name;
+  // Resolve the destination before changing config, session state, or approval state.
+  const destinationEnvSets =
+    result.destination === "session" ? undefined : await getDestinationEnvSets(result.destination, deps.projectRoot);
 
   // Apply changes based on source/destination combination
   if (source === "session" && result.destination === "session") {
@@ -292,11 +297,11 @@ async function handleEdit(
     deps.tools.push(updatedTool);
   }
 
-  approvalRegistry.delete(sourceName);
+  if (destName === sourceName) approvalRegistry.delete(sourceName);
   if (result.destination === "session") {
     registerArmoryTool(pi, updatedTool);
   } else {
-    registerArmoryTool(pi, updatedTool, await getDestinationEnvSets(result.destination, deps.projectRoot));
+    registerArmoryTool(pi, updatedTool, destinationEnvSets);
   }
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
@@ -362,8 +367,7 @@ async function handleDelete(
     if (idx !== -1) deps.tools.splice(idx, 1);
   }
 
-  // Clean up approval registry and deactivate unless a lower-precedence persisted tool is revealed.
-  approvalRegistry.delete(tool.name);
+  // Deactivate before attempting to reveal a lower-precedence persisted tool.
   await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
 
   ctx.ui.notify(`Tool '${tool.name}' deleted`, "info");

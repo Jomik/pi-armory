@@ -440,8 +440,11 @@ describe("handleEdit", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });
 
-  it("does not register a persisted edit when its env sets cannot be loaded", async () => {
-    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+  it("preserves the old approval gate and registry when edited destination env sets cannot be loaded", async () => {
+    const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
+    approvalRegistry.set(oldTool.name, oldTool);
+    toolRegistry.set(oldTool.name, oldTool);
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: oldTool, source: "project" });
     vi.mocked(showToolEditor).mockResolvedValue({
       name: "run_tests",
       command: "npm test --watch",
@@ -454,9 +457,51 @@ describe("handleEdit", () => {
     vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
 
     const pi = makePi();
+    const deps = makeDeps({ tools: [oldTool] });
+    registerArmoryCommand(pi as never, deps);
+    await expect(getHandler(pi)("edit run_tests", makeCtx() as never)).rejects.toThrow("invalid config");
+    expect(approvalRegistry.get(oldTool.name)).toBe(oldTool);
+    expect(toolRegistry.get(oldTool.name)).toBe(oldTool);
+    expect(deps.tools).toEqual([oldTool]);
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+  });
+
+  it("deactivates a renamed session name if revealing the persisted tool fails", async () => {
+    const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
+    const renamedTool: ArmoryTool = { ...oldTool, name: "renamed_tests" };
+    sessionRegistry.set(oldTool.name, oldTool);
+    approvalRegistry.set(oldTool.name, oldTool);
+    toolRegistry.set(oldTool.name, oldTool);
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "global" });
+    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: renamedTool.name,
+      command: renamedTool.command,
+      description: renamedTool.description,
+      guidelines: [],
+      requiresApproval: true,
+      destination: "session",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue(renamedTool);
+
+    const pi = makePi();
+    let active = pi.getActiveTools();
+    pi.getActiveTools.mockImplementation(() => active);
+    pi.setActiveTools.mockImplementation((names) => {
+      active = names;
+    });
     registerArmoryCommand(pi as never, makeDeps());
     await expect(getHandler(pi)("edit run_tests", makeCtx() as never)).rejects.toThrow("invalid config");
-    expect(registerArmoryTool).not.toHaveBeenCalled();
+
+    expect(sessionRegistry.has(oldTool.name)).toBe(false);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, renamedTool);
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
+    expect(active).not.toContain(oldTool.name);
+    expect(toolRegistry.has(oldTool.name)).toBe(false);
+    expect(approvalRegistry.has(oldTool.name)).toBe(false);
   });
 
   it("aborts without changes when the edited name is invalid/empty", async () => {
@@ -705,6 +750,33 @@ describe("handleDelete", () => {
     expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, conditionedTool, envSets);
     expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, conditionedTool);
+  });
+
+  it("deactivates a deleted name if revealing the persisted tool fails", async () => {
+    const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
+    sessionRegistry.set(oldTool.name, oldTool);
+    approvalRegistry.set(oldTool.name, oldTool);
+    toolRegistry.set(oldTool.name, oldTool);
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "global" });
+    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
+
+    const pi = makePi();
+    let active = pi.getActiveTools();
+    pi.getActiveTools.mockImplementation(() => active);
+    pi.setActiveTools.mockImplementation((names) => {
+      active = names;
+    });
+    registerArmoryCommand(pi as never, makeDeps());
+    await expect(getHandler(pi)("delete run_tests", makeCtx({ selectResponses: ["Delete"] }) as never)).rejects.toThrow(
+      "invalid config",
+    );
+
+    expect(sessionRegistry.has(oldTool.name)).toBe(false);
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(active).not.toContain(oldTool.name);
+    expect(toolRegistry.has(oldTool.name)).toBe(false);
+    expect(approvalRegistry.has(oldTool.name)).toBe(false);
   });
 
   it("deletes a global tool — confirmation mentions global config", async () => {
