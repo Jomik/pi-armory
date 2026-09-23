@@ -174,62 +174,63 @@ describe("handleEdit", () => {
     { source: "session", destination: "project", original: toolSession },
     { source: "project", destination: "session", original: toolProject },
     { source: "project", destination: "project", original: toolProject },
-  ] as const)(
-    "refuses $source → $destination rename into a different session tool without changing state",
-    async ({ source, destination, original }) => {
-      const occupied: ArmoryTool = {
-        name: "occupied_tool",
-        command: "secret existing command",
-        description: "Existing session tool",
-      };
-      sessionRegistry.set(occupied.name, occupied);
-      if (source === "session") {
-        sessionRegistry.set(original.name, original);
-      } else {
-        vi.mocked(loadToolWithSource).mockResolvedValue({ tool: original, source });
-      }
-      for (const entry of [original, occupied]) {
-        approvalRegistry.set(entry.name, entry);
-        toolRegistry.set(entry.name, entry);
-      }
-      vi.mocked(showToolEditor).mockResolvedValue({
-        ...original,
-        name: "Occupied Tool!",
-        guidelines: [],
-        requiresApproval: false,
-        destination,
-      });
-      const pi = makePi();
-      const deps = makeDeps({ tools: source === "session" ? [] : [original] });
-      const ctx = makeCtx({ selectResponses: ["Confirm"] });
-      registerArmoryCommand(pi as never, deps);
-      await getHandler(pi)(`edit ${original.name}`, ctx as never);
+  ] as const)("refuses $source → $destination rename into a different session tool without changing state", async ({
+    source,
+    destination,
+    original,
+  }) => {
+    const occupied: ArmoryTool = {
+      name: "occupied_tool",
+      command: "secret existing command",
+      description: "Existing session tool",
+    };
+    sessionRegistry.set(occupied.name, occupied);
+    if (source === "session") {
+      sessionRegistry.set(original.name, original);
+    } else {
+      vi.mocked(loadToolWithSource).mockResolvedValue({ tool: original, source });
+    }
+    for (const entry of [original, occupied]) {
+      approvalRegistry.set(entry.name, entry);
+      toolRegistry.set(entry.name, entry);
+    }
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...original,
+      name: "Occupied Tool!",
+      guidelines: [],
+      requiresApproval: false,
+      destination,
+    });
+    const pi = makePi();
+    const deps = makeDeps({ tools: source === "session" ? [] : [original] });
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
+    registerArmoryCommand(pi as never, deps);
+    await getHandler(pi)(`edit ${original.name}`, ctx as never);
 
-      expect(ctx.ui.notify).toHaveBeenCalledWith(
-        expect.stringMatching(/occupied_tool.*already exists.*rename/i),
-        "error",
-      );
-      expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toMatch(/secret existing command|npm test|echo session/);
-      expect(ctx.ui.select).not.toHaveBeenCalled();
-      expect(sessionRegistry.get(occupied.name)).toBe(occupied);
-      expect([...sessionRegistry.keys()]).toEqual(
-        source === "session" ? [occupied.name, original.name] : [occupied.name],
-      );
-      if (source === "session") expect(sessionRegistry.get(original.name)).toBe(original);
-      expect(deps.tools).toEqual(source === "session" ? [] : [original]);
-      for (const entry of [original, occupied]) {
-        expect(approvalRegistry.get(entry.name)).toBe(entry);
-        expect(toolRegistry.get(entry.name)).toBe(entry);
-      }
-      expect(loadToolInDestination).not.toHaveBeenCalled();
-      expect(saveConfig).not.toHaveBeenCalled();
-      expect(removeFromConfig).not.toHaveBeenCalled();
-      expect(registerArmoryTool).not.toHaveBeenCalled();
-      expect(syncToolCondition).not.toHaveBeenCalled();
-      expect(pi.setActiveTools).not.toHaveBeenCalled();
-      expect(pi.getActiveTools()).toEqual(["run_tests", "session_tool", "global_tool"]);
-    },
-  );
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/occupied_tool.*already exists.*rename/i),
+      "error",
+    );
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toMatch(/secret existing command|npm test|echo session/);
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(sessionRegistry.get(occupied.name)).toBe(occupied);
+    expect([...sessionRegistry.keys()]).toEqual(
+      source === "session" ? [occupied.name, original.name] : [occupied.name],
+    );
+    if (source === "session") expect(sessionRegistry.get(original.name)).toBe(original);
+    expect(deps.tools).toEqual(source === "session" ? [] : [original]);
+    for (const entry of [original, occupied]) {
+      expect(approvalRegistry.get(entry.name)).toBe(entry);
+      expect(toolRegistry.get(entry.name)).toBe(entry);
+    }
+    expect(loadToolInDestination).not.toHaveBeenCalled();
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(syncToolCondition).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+    expect(pi.getActiveTools()).toEqual(["run_tests", "session_tool", "global_tool"]);
+  });
 
   it("promoting session → project requires confirmation and saves to config", async () => {
     sessionRegistry.set("session_tool", toolSession);
