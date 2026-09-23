@@ -216,6 +216,20 @@ async function handleEdit(
 
   const { tool, source } = found;
 
+  // Load each scope independently: an invalid unrelated config must not hide the valid scope.
+  const envSets: Partial<Record<"project" | "global", Awaited<ReturnType<typeof getDestinationEnvSets>>>> = {};
+  for (const scope of ["project", "global"] as const) {
+    try {
+      envSets[scope] = await getDestinationEnvSets(scope, deps.projectRoot);
+    } catch {
+      // The unavailable scope cannot be selected for persistence below.
+    }
+  }
+  if (source !== "session" && !envSets[source]) {
+    ctx.ui.notify("Could not load environment sets for this tool's config. Fix the config and retry.", "error");
+    return;
+  }
+
   const result = await showToolEditor(
     ctx,
     {
@@ -227,6 +241,8 @@ async function handleEdit(
       requiresApproval: tool.requires_approval ?? false,
       destination: source,
       when: tool.when,
+      envFrom: tool.envFrom,
+      envSets,
     },
     deps.draftModelName,
   );
@@ -257,12 +273,31 @@ async function handleEdit(
     if (choice !== "Confirm") return; // user aborted — no changes applied
   }
 
+  const selectedEnvFrom = result.envFrom ?? tool.envFrom ?? [];
+  const destinationEnvSets = result.destination === "session" ? undefined : envSets[result.destination];
+  if (
+    (result.destination === "session" && selectedEnvFrom.length > 0) ||
+    (result.destination !== "session" &&
+      (!destinationEnvSets || selectedEnvFrom.some((setName) => !Object.hasOwn(destinationEnvSets, setName))))
+  ) {
+    ctx.ui.notify("Environment set selection is unavailable for this destination. Review the config and retry.", "error");
+    return;
+  }
+
+  // A move must not write its destination if its source has become invalid since the form opened.
+  if (source !== "session" && source !== result.destination) {
+    try {
+      await getDestinationEnvSets(source, deps.projectRoot);
+    } catch {
+      ctx.ui.notify("Could not load the source config. Fix the config and retry.", "error");
+      return;
+    }
+  }
+
   const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, envFrom: tool.envFrom });
   const sourceName = tool.name;
   const destName = updatedTool.name;
-  // Resolve the destination before changing config, session state, or approval state.
-  const destinationEnvSets =
-    result.destination === "session" ? undefined : await getDestinationEnvSets(result.destination, deps.projectRoot);
+  let savedEnvSets = destinationEnvSets;
 
   // Apply changes based on source/destination combination
   if (source === "session" && result.destination === "session") {
@@ -272,7 +307,12 @@ async function handleEdit(
   } else if (source === "session" && result.destination !== "session") {
     // Session → project/global: persist and remove from session. If the session tool
     // shadowed a persisted tool and was renamed, leave the shadowed tool intact.
-    await saveConfig(updatedTool, result.destination as "project" | "global", deps.projectRoot);
+    try {
+      savedEnvSets = await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
+    } catch {
+      ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
+      return;
+    }
     sessionRegistry.delete(sourceName);
     const replacedName = destName === sourceName ? sourceName : destName;
     const idx = deps.tools.findIndex((t) => t.name === replacedName);
@@ -280,14 +320,24 @@ async function handleEdit(
     deps.tools.push(updatedTool);
   } else if (source !== "session" && result.destination === "session") {
     // Project/global → session: remove from config and keep in-memory only
-    await removeFromConfig(sourceName, source as "project" | "global", deps.projectRoot);
+    try {
+      await removeFromConfig(sourceName, source, deps.projectRoot);
+    } catch {
+      ctx.ui.notify("Could not remove tool from source config. Fix the config and retry.", "error");
+      return;
+    }
     sessionRegistry.set(destName, updatedTool);
     // Remove from persisted tool list
     const idx = deps.tools.findIndex((t) => t.name === sourceName);
     if (idx !== -1) deps.tools.splice(idx, 1);
   } else {
     // Project/global → project/global: persist (may move between locations)
-    await saveConfig(updatedTool, result.destination as "project" | "global", deps.projectRoot);
+    try {
+      savedEnvSets = await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
+    } catch {
+      ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
+      return;
+    }
     if (result.destination !== source || destName !== sourceName) {
       await removeFromConfig(sourceName, source as "project" | "global", deps.projectRoot);
     }
@@ -301,7 +351,7 @@ async function handleEdit(
   if (result.destination === "session") {
     registerArmoryTool(pi, updatedTool);
   } else {
-    registerArmoryTool(pi, updatedTool, destinationEnvSets);
+    registerArmoryTool(pi, updatedTool, savedEnvSets);
   }
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
