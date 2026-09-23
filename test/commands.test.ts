@@ -392,7 +392,12 @@ describe("handleEdit", () => {
   it("does not write when the destination snapshot cannot be loaded", async () => {
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
     vi.mocked(loadToolInDestination).mockRejectedValue(new Error("secret destination detail"));
-    vi.mocked(showToolEditor).mockResolvedValue({ ...toolProject, destination: "global" });
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...toolProject,
+      guidelines: [],
+      requiresApproval: false,
+      destination: "global",
+    });
     const pi = makePi();
     const deps = makeDeps();
     const ctx = makeCtx({ selectResponses: ["Confirm"] });
@@ -411,7 +416,12 @@ describe("handleEdit", () => {
     const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
     const movedTool: ArmoryTool = { ...oldTool, command: "npm test --watch" };
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: oldTool, source: "project" });
-    vi.mocked(showToolEditor).mockResolvedValue({ ...movedTool, destination: "global" });
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...movedTool,
+      guidelines: [],
+      requiresApproval: true,
+      destination: "global",
+    });
     vi.mocked(buildToolFromResult).mockReturnValue(movedTool);
     vi.mocked(removeFromConfig).mockRejectedValueOnce(new Error("secret source detail"));
     approvalRegistry.set(oldTool.name, oldTool);
@@ -450,7 +460,12 @@ describe("handleEdit", () => {
     };
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: oldTool, source: "project" });
     vi.mocked(loadToolInDestination).mockResolvedValue(priorDestination);
-    vi.mocked(showToolEditor).mockResolvedValue({ ...oldTool, destination: "global" });
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...oldTool,
+      guidelines: [],
+      requiresApproval: true,
+      destination: "global",
+    });
     vi.mocked(buildToolFromResult).mockReturnValue(oldTool);
     vi.mocked(removeFromConfig).mockRejectedValueOnce(new Error("source write error"));
     const pi = makePi();
@@ -471,7 +486,12 @@ describe("handleEdit", () => {
   it("reports partial changes when rollback of a same-config rename also fails", async () => {
     const renamed: ArmoryTool = { ...toolProject, name: "renamed_tool" };
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
-    vi.mocked(showToolEditor).mockResolvedValue({ ...renamed, destination: "project" });
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...renamed,
+      guidelines: [],
+      requiresApproval: false,
+      destination: "project",
+    });
     vi.mocked(buildToolFromResult).mockReturnValue(renamed);
     vi.mocked(removeFromConfig)
       .mockRejectedValueOnce(new Error("secret source detail"))
