@@ -337,26 +337,30 @@ async function handleEdit(
   } else if (source !== "session" && result.destination !== "session") {
     // Project/global → project/global: persist (may move between locations)
     const needsRemoval = result.destination !== source || destName !== sourceName;
-    let priorDestinationTool: ArmoryTool | null = null;
     try {
       if (needsRemoval) {
-        priorDestinationTool = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+        const existing = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+        if (existing) {
+          ctx.ui.notify(
+            `Tool '${destName}' already exists in the destination config. Rename it or remove the existing tool and retry.`,
+            "error",
+          );
+          return;
+        }
       }
-      savedEnvSets = await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
+      savedEnvSets = needsRemoval
+        ? await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets, true)
+        : await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
     } catch {
       ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
       return;
     }
     if (needsRemoval) {
       try {
-        await removeFromConfig(sourceName, source, deps.projectRoot);
+        await removeFromConfig(sourceName, source, deps.projectRoot, undefined, tool);
       } catch {
         try {
-          if (priorDestinationTool) {
-            await saveConfig(priorDestinationTool, result.destination, deps.projectRoot);
-          } else {
-            await removeFromConfig(destName, result.destination, deps.projectRoot);
-          }
+          await removeFromConfig(destName, result.destination, deps.projectRoot, undefined, updatedTool);
           ctx.ui.notify("Could not remove tool from source config. Review the config and retry.", "error");
         } catch {
           ctx.ui.notify(
