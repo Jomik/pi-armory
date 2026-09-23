@@ -259,6 +259,11 @@ async function processCandidate(
     return "skipped";
   }
 
+  if (sessionRegistry.has(name)) {
+    ctx.ui.notify(`Skipped '${candidate.label}': tool name already used by a session tool`, "info");
+    return "skipped";
+  }
+
   const tool = buildToolFromResult({
     ...result,
     name,
@@ -271,13 +276,12 @@ async function processCandidate(
   } else {
     let savedSets: EnvSets;
     try {
-      savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+      savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination], true);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") throw err;
       ctx.ui.notify(`Skipped '${candidate.label}': save failed`, "info");
       return "skipped";
     }
-    sessionRegistry.delete(tool.name);
     registerArmoryTool(pi, tool, savedSets);
   }
   if (result.destination === "session") {

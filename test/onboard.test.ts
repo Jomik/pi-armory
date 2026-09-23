@@ -352,7 +352,7 @@ describe("handleOnboard — per-candidate flow", () => {
       "provider:model",
       expect.objectContaining({ command: "npm test" }),
     );
-    expect(saveConfig).toHaveBeenCalledWith(builtTool, "project", "/project", undefined, envSets);
+    expect(saveConfig).toHaveBeenCalledWith(builtTool, "project", "/project", undefined, envSets, true);
     expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool, envSets);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 tool registered"), "info");
@@ -400,7 +400,7 @@ describe("handleOnboard — per-candidate flow", () => {
       "provider:model",
       expect.anything(),
     );
-    expect(saveConfig).toHaveBeenCalledWith(tool, destination, "/project", undefined, displayed);
+    expect(saveConfig).toHaveBeenCalledWith(tool, destination, "/project", undefined, displayed, true);
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, tool, saved);
     expect(getDestinationEnvSets).toHaveBeenCalledTimes(2);
   });
@@ -418,7 +418,7 @@ describe("handleOnboard — per-candidate flow", () => {
       description: "Run tests",
       envFrom: ["common"],
     });
-    sessionRegistry.set("run_tests", { name: "old", command: "echo old", description: "Old tool" });
+    sessionRegistry.set("other_tool", { name: "other_tool", command: "echo old", description: "Old tool" });
     const pi = makePi();
     const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
@@ -434,21 +434,57 @@ describe("handleOnboard — per-candidate flow", () => {
       "/project",
       undefined,
       { common: { TOKEN: "value" } },
+      true,
     );
     expect(registerArmoryTool).not.toHaveBeenCalled();
-    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old", command: "echo old", description: "Old tool" });
+    expect(sessionRegistry.get("other_tool")).toEqual({ name: "other_tool", command: "echo old", description: "Old tool" });
     expect(syncToolCondition).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': save failed", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Onboarding complete: 0 registered, 1 skipped.", "info");
     expect(vi.mocked(ctx.ui.notify).mock.calls.flat().join(" ")).not.toContain("Selected env set changed");
   });
 
-  it("continues after a failed save without mutating the failed candidate's registry or file", async () => {
+  it("skips a normalized session name collision and continues the batch", async () => {
+    const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
+    const oldTool = { name: "run_tests", command: "echo existing" };
+    const lintTool = { name: "lint", command: "biome check", description: "Lint" };
+    sessionRegistry.set("run_tests", oldTool);
+    vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
+    vi.mocked(showToolEditor)
+      .mockResolvedValueOnce({ ...sampleEditorResult, name: "Run Tests", destination: "session" })
+      .mockResolvedValueOnce({ ...sampleEditorResult, name: "lint", destination: "session" });
+    vi.mocked(buildToolFromResult).mockReturnValue(lintTool);
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Select all", "Confirm"] });
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(buildToolFromResult).toHaveBeenCalledTimes(1);
+    expect(sessionRegistry.get("run_tests")).toBe(oldTool);
+    expect(sessionRegistry.get("lint")).toBe(lintTool);
+    expect(registerArmoryTool).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': tool name already used by a session tool", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Onboarding complete: 1 registered, 1 skipped.", "info");
+  });
+
+  it("skips a persisted candidate colliding with a session tool before saving", async () => {
+    const oldTool = { name: "run_tests", command: "echo existing" };
+    sessionRegistry.set("run_tests", oldTool);
+    vi.mocked(showToolEditor).mockResolvedValue(sampleEditorResult);
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("run_tests")).toBe(oldTool);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': tool name already used by a session tool", "info");
+  });
+
+  it("continues after a same-destination persisted createOnly collision without replacing the existing tool", async () => {
     const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
     const lintTool = { name: "lint", command: "biome check", description: "Lint the codebase" };
     const oldTool = { name: "old", command: "echo old", description: "Old tool" };
     const savedFiles = new Map<string, unknown>([["run_tests", oldTool]]);
-    sessionRegistry.set("run_tests", oldTool);
+    sessionRegistry.set("other_tool", oldTool);
     vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
     vi.mocked(mockDraft)
       .mockResolvedValueOnce(sampleDraft)
@@ -460,7 +496,7 @@ describe("handleOnboard — per-candidate flow", () => {
       .mockReturnValueOnce({ name: "run_tests", command: "npm test", description: "Run tests" })
       .mockReturnValueOnce(lintTool);
     vi.mocked(saveConfig)
-      .mockRejectedValueOnce(new Error("secret resolver output"))
+      .mockRejectedValueOnce(new Error("Tool run_tests already exists; secret resolver output"))
       .mockImplementationOnce(async (tool) => {
         savedFiles.set(tool.name, tool);
         return {};
@@ -471,9 +507,19 @@ describe("handleOnboard — per-candidate flow", () => {
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
     expect(saveConfig).toHaveBeenCalledTimes(2);
+    expect(saveConfig).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ name: "run_tests" }),
+      "project",
+      "/project",
+      undefined,
+      {},
+      true,
+    );
+    expect(saveConfig).toHaveBeenNthCalledWith(2, lintTool, "project", "/project", undefined, {}, true);
     expect(savedFiles.get("run_tests")).toBe(oldTool);
     expect(savedFiles.get("lint")).toBe(lintTool);
-    expect(sessionRegistry.get("run_tests")).toBe(oldTool);
+    expect(sessionRegistry.get("other_tool")).toBe(oldTool);
     expect(registerArmoryTool).toHaveBeenCalledTimes(1);
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, lintTool, {});
     expect(syncToolCondition).toHaveBeenCalledTimes(1);

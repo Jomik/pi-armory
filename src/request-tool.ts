@@ -149,6 +149,10 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
+      if (sessionRegistry.has(name)) {
+        throw new Error(`Tool name '${name}' is already used by a session tool. Choose another name.`);
+      }
+
       const tool = buildToolFromResult({
         ...result,
         name,
@@ -164,8 +168,8 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           projectRoot,
           undefined,
           envSets[result.destination],
+          true,
         );
-        sessionRegistry.delete(tool.name);
         registerArmoryTool(pi, tool, savedSets);
       }
       if (result.destination === "session") {
