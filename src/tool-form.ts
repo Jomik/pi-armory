@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Editor, Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { EnvSets } from "./config.js";
 import { parsePlaceholders } from "./placeholders.js";
 
 export interface ToolFormResult {
@@ -11,12 +12,26 @@ export interface ToolFormResult {
   requiresApproval: boolean;
   destination: "project" | "global" | "session";
   when?: "git" | "jj";
+  envFrom?: string[];
 }
 
 export type ToolFormState = ToolFormResult & {
   /** Optional title shown at top of form. Defaults to "Request Tool". */
   title?: string;
+  /** Available definitions for each persisted destination; never shown or sent to the drafter. */
+  envSets?: Partial<Record<"project" | "global", EnvSets>>;
 };
+
+function definitionKey(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(definitionKey).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${definitionKey(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 
 export interface ToolFormCallbacks {
   onRedraft?: (current: ToolFormResult, instruction: string) => Promise<Partial<ToolFormResult> | null>;
@@ -34,7 +49,7 @@ export function toolFormPanel(
   initialState: ToolFormState,
   callbacks?: ToolFormCallbacks,
 ): { invalidate(): void; render(width: number): string[]; handleInput(data: string): void } {
-  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=condition, 7=re-draft (if available)
+  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=condition, 7=env sets, 8=re-draft
   let requiresApproval = initialState.requiresApproval;
   let destination: "project" | "global" | "session" = initialState.destination;
   let when: "git" | "jj" | undefined = initialState.when;
@@ -42,7 +57,34 @@ export function toolFormPanel(
   const title = initialState.title ?? "Request Tool";
   let mode: "normal" | "instruction" | "drafting" | "rejecting" = "normal";
   let draftError: string | null = null;
-  const maxFocus = callbacks?.onRedraft ? 7 : 6;
+  const maxFocus = callbacks?.onRedraft ? 8 : 7;
+  const envSets = initialState.envSets ?? {};
+  let envFrom = [...new Set(initialState.envFrom ?? [])];
+  let envFromTouched = initialState.envFrom !== undefined;
+  const sourceDefinitions = new Map<string, string | undefined>(
+    envFrom.map((name) => [name, definitionFor(initialState.destination, name)]),
+  );
+  let envSelection = 0;
+
+  function definitionFor(scope: "project" | "global" | "session", name: string): string | undefined {
+    if (scope === "session") return undefined;
+    const sets = envSets[scope];
+    return sets && Object.hasOwn(sets, name) ? definitionKey(sets[name]) : undefined;
+  }
+
+  function unresolved(name: string): boolean {
+    const definition = definitionFor(destination, name);
+    return (
+      definition === undefined ||
+      sourceDefinitions.get(name) === undefined ||
+      definition !== sourceDefinitions.get(name)
+    );
+  }
+
+  function envOptions(): string[] {
+    const available = destination === "session" ? [] : Object.keys(envSets[destination] ?? {});
+    return [...new Set([...available, ...envFrom])];
+  }
 
   const editorTheme = {
     borderColor: (s: string) => theme.fg("border", s),
@@ -116,6 +158,7 @@ export function toolFormPanel(
       requiresApproval,
       destination,
       ...(when ? { when } : {}),
+      ...(envFromTouched ? { envFrom: [...envFrom] } : {}),
     };
   }
 
@@ -266,7 +309,28 @@ export function toolFormPanel(
         ` ${focus === 6 ? theme.fg("accent", condLabel) : theme.fg("muted", condLabel)} ${theme.fg("text", `${alwaysMark} Always  ${gitMark} Git  ${jjMark} Jj`)}`,
       );
 
-      // Re-draft button (focus 7)
+      // Env set names only: definitions may contain secrets or resolver commands.
+      const envLabel = "Env sets:".padEnd(LABEL);
+      const options = envOptions();
+      lines.push("");
+      lines.push(` ${focus === 7 ? theme.fg("accent", envLabel) : theme.fg("muted", envLabel)} ${
+        options.length
+          ? options
+              .map((name, i) => {
+                const mark = envFrom.includes(name) ? "☑" : "☐";
+                const status = envFrom.includes(name) && unresolved(name) ? " (unresolved)" : "";
+                return `${focus === 7 && envSelection % options.length === i ? "› " : ""}${mark} ${name}${status}`;
+              })
+              .join("  ")
+          : theme.fg("dim", "(none)")
+      }`);
+      if (envFrom.some(unresolved)) {
+        lines.push(
+          ` ${theme.fg("error", "Unresolved env sets: deselect, then reselect in the target destination before approval")}`,
+        );
+      }
+
+      // Re-draft button (focus 8)
       if (callbacks?.onRedraft) {
         lines.push("");
         const redraftLabel = "Re-draft:".padEnd(LABEL);
@@ -283,7 +347,7 @@ export function toolFormPanel(
               lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
             }
           }
-        } else if (focus === 7) {
+        } else if (focus === 8) {
           lines.push(` ${theme.fg("accent", redraftLabel)} ${theme.fg("accent", "● Press Enter to re-draft with AI")}`);
         } else {
           lines.push(` ${theme.fg("muted", redraftLabel)} ${theme.fg("dim", "Press Enter to re-draft with AI")}`);
@@ -317,8 +381,10 @@ export function toolFormPanel(
           hint = "Enter next field  •  Esc reject  •  Tab next field";
         } else if (focus === 3) {
           hint = "Enter save/add  •  ↑↓ edit prior  •  Delete remove selected  •  Esc reject  •  Tab next field";
-        } else if (focus === 7) {
+        } else if (focus === 8) {
           hint = "Enter re-draft  •  Esc reject  •  Tab next field";
+        } else if (focus === 7) {
+          hint = "←→ choose set  •  Space toggle  •  Enter approve  •  Esc reject";
         } else {
           hint = "Enter approve  •  Esc reject  •  ←→/Space toggle";
         }
@@ -463,14 +529,15 @@ export function toolFormPanel(
             focus = 4;
             tui.requestRender();
           }
-        } else if (focus === 7 && callbacks?.onRedraft) {
+        } else if (focus === 8 && callbacks?.onRedraft) {
           // Enter re-draft instruction mode
           draftError = null;
           mode = "instruction";
           tui.requestRender();
         } else {
-          // focus 4, 5, or 6 — approve
-          done(currentResult());
+          // Approve only when all selected sets match the destination.
+          if (!envFrom.some(unresolved)) done(currentResult());
+          else tui.requestRender();
         }
         return;
       }
@@ -521,6 +588,28 @@ export function toolFormPanel(
           tui.requestRender();
         } else if (matchesKey(data, Key.left)) {
           when = when === undefined ? "jj" : when === "jj" ? "git" : undefined;
+          tui.requestRender();
+        }
+        return;
+      }
+
+      // Env set picker: cycle through available and unresolved names, toggle selection explicitly.
+      if (focus === 7) {
+        const options = envOptions();
+        if (options.length && (matchesKey(data, Key.left) || matchesKey(data, Key.right))) {
+          envSelection = (envSelection + (matchesKey(data, Key.right) ? 1 : options.length - 1)) % options.length;
+          tui.requestRender();
+        } else if (options.length && matchesKey(data, Key.space)) {
+          const name = options[envSelection % options.length];
+          if (envFrom.includes(name)) {
+            envFrom = envFrom.filter((selected) => selected !== name);
+            sourceDefinitions.delete(name);
+          } else {
+            envFrom = [...envFrom, name];
+            sourceDefinitions.set(name, definitionFor(destination, name));
+          }
+          envFromTouched = true;
+          envSelection = Math.max(0, Math.min(envSelection, envOptions().length - 1));
           tui.requestRender();
         }
         return;

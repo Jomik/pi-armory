@@ -1,7 +1,8 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import { type ToolFormResult, toolFormPanel } from "../src/tool-form.js";
+import type { EnvSets } from "../src/config.js";
+import { type ToolFormResult, type ToolFormState, toolFormPanel } from "../src/tool-form.js";
 
 function plainTheme(): Theme {
   return {
@@ -10,7 +11,12 @@ function plainTheme(): Theme {
   } as Theme;
 }
 
-function makePanel(guidelines: string[] = [], callbacks?: Parameters<typeof toolFormPanel>[4], when?: "git" | "jj") {
+function makePanel(
+  guidelines: string[] = [],
+  callbacks?: Parameters<typeof toolFormPanel>[4],
+  when?: "git" | "jj",
+  initial?: Partial<ToolFormState>,
+) {
   let result: ToolFormResult | undefined;
   const tui = { requestRender: vi.fn() } as unknown as TUI;
   const panel = toolFormPanel(
@@ -28,6 +34,7 @@ function makePanel(guidelines: string[] = [], callbacks?: Parameters<typeof tool
       requiresApproval: false,
       destination: "session",
       ...(when ? { when } : {}),
+      ...initial,
     },
     callbacks,
   );
@@ -131,7 +138,7 @@ describe("toolFormPanel guideline editing", () => {
 });
 
 function focusRedraft(panel: ReturnType<typeof makePanel>["panel"]) {
-  for (let i = 0; i < 7; i++) panel.handleInput("\t"); // name -> ... -> condition -> re-draft
+  for (let i = 0; i < 8; i++) panel.handleInput("\t"); // name -> ... -> env sets -> re-draft
 }
 
 describe("toolFormPanel re-draft", () => {
@@ -191,6 +198,118 @@ describe("toolFormPanel re-draft", () => {
 
     expect(onRedraft).toHaveBeenCalledOnce();
     expect(getResult()?.command).toBe("npm test");
+  });
+});
+
+describe("toolFormPanel env set selection", () => {
+  const project: EnvSets = {
+    alpha: { TOKEN: { env: "HOST_TOKEN", secret: true } },
+    beta: { COLOR: "blue" },
+  };
+
+  function focusEnv(panel: ReturnType<typeof makePanel>["panel"]) {
+    for (let i = 0; i < 7; i++) panel.handleInput("\t");
+  }
+
+  it("selects multiple sets by name and returns an explicit empty array when cleared", () => {
+    const { panel, getResult } = makePanel([], undefined, undefined, { destination: "project", envSets: { project } });
+    focusEnv(panel);
+    panel.handleInput(" "); // alpha
+    panel.handleInput("\x1b[C"); // beta
+    panel.handleInput(" ");
+    expect(panel.render(100).join("\n")).toContain("☑ beta");
+    panel.handleInput("\r");
+    expect(getResult()?.envFrom).toEqual(["alpha", "beta"]);
+
+    const cleared = makePanel([], undefined, undefined, {
+      destination: "project",
+      envSets: { project },
+      envFrom: ["alpha"],
+    });
+    focusEnv(cleared.panel);
+    cleared.panel.handleInput(" ");
+    cleared.panel.handleInput("\r");
+    expect(cleared.getResult()?.envFrom).toEqual([]);
+  });
+
+  it("rejects selected sets in session but permits deselection and approval", () => {
+    const { panel, getResult } = makePanel([], undefined, undefined, {
+      destination: "project",
+      envSets: { project },
+      envFrom: ["alpha"],
+    });
+    for (let i = 0; i < 5; i++) panel.handleInput("\t");
+    panel.handleInput("\x1b[D"); // project -> session
+    panel.handleInput("\r");
+    expect(getResult()).toBeUndefined();
+    expect(panel.render(100).join("\n")).toContain("alpha (unresolved)");
+    panel.handleInput("\t"); // condition
+    panel.handleInput("\t"); // env sets
+    panel.handleInput(" "); // deselect alpha
+    panel.handleInput("\r");
+    expect(getResult()?.envFrom).toEqual([]);
+    expect(getResult()?.destination).toBe("session");
+  });
+
+  it("requires explicit deselect and reselect when same-name definitions differ, ignoring key order", () => {
+    const global: EnvSets = {
+      alpha: { TOKEN: { secret: true, env: "HOST_TOKEN" } },
+    };
+    const { panel, getResult } = makePanel([], undefined, undefined, {
+      destination: "project",
+      envSets: { project, global },
+      envFrom: ["alpha"],
+    });
+    for (let i = 0; i < 5; i++) panel.handleInput("\t");
+    panel.handleInput("\x1b[C"); // global, equivalent definition
+    panel.handleInput("\r");
+    expect(getResult()?.envFrom).toEqual(["alpha"]);
+
+    const different: EnvSets = { alpha: { TOKEN: { env: "HOST_TOKEN", secret: false } } };
+    const changed = makePanel([], undefined, undefined, {
+      destination: "project",
+      envSets: { project, global: different },
+      envFrom: ["alpha"],
+    });
+    for (let i = 0; i < 5; i++) changed.panel.handleInput("\t");
+    changed.panel.handleInput("\x1b[C");
+    changed.panel.handleInput("\r");
+    expect(changed.getResult()).toBeUndefined();
+    expect(changed.panel.render(100).join("\n")).toContain("alpha (unresolved)");
+    changed.panel.handleInput("\t");
+    changed.panel.handleInput("\t");
+    changed.panel.handleInput(" "); // remove old source
+    changed.panel.handleInput(" "); // select target definition
+    changed.panel.handleInput("\r");
+    expect(changed.getResult()?.envFrom).toEqual(["alpha"]);
+  });
+
+  it("keeps human selections across re-draft and never exposes definitions to the callback or UI", async () => {
+    const onRedraft = vi.fn().mockResolvedValue({ destination: "global", envFrom: [] });
+    const { panel, getResult } = makePanel([], { onRedraft }, undefined, {
+      destination: "project",
+      envSets: { project, global: { alpha: { TOKEN: { command: "private-resolver", secret: true } } } },
+      envFrom: ["alpha"],
+    });
+    focusRedraft(panel);
+    panel.handleInput("\r");
+    panel.handleInput("change destination");
+    panel.handleInput("\r");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onRedraft.mock.calls[0]?.[0].envFrom).toEqual(["alpha"]);
+    expect(onRedraft.mock.calls[0]?.[0]).not.toHaveProperty("envSets");
+    const rendered = panel.render(100).join("\n");
+    expect(rendered).toContain("alpha (unresolved)");
+    expect(rendered).not.toContain("private-resolver");
+    expect(rendered).not.toContain("HOST_TOKEN");
+    panel.handleInput("\x1b[A"); // env sets
+    panel.handleInput("\r");
+    expect(getResult()).toBeUndefined();
+    panel.handleInput(" ");
+    panel.handleInput(" ");
+    panel.handleInput("\r");
+    expect(getResult()?.envFrom).toEqual(["alpha"]);
+    expect(getResult()?.destination).toBe("global");
   });
 });
 
