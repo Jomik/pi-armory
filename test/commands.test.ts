@@ -389,9 +389,10 @@ describe("handleEdit", () => {
     expect(removeFromConfig).toHaveBeenCalledWith("global_tool", "global", "/project");
   });
 
-  it("same-destination persisted edit requires no confirmation", async () => {
-    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
-    const updatedTool = { name: "run_tests", command: "npm test --watch", description: "Run tests" };
+  it("same-destination persisted edit forwards env sets and inline env without confirmation", async () => {
+    const existingTool: ArmoryTool = { ...toolProject, envFrom: ["common"], env: { INLINE: "value" } };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: existingTool, source: "project" });
+    const updatedTool = { ...existingTool, command: "npm test --watch" };
     vi.mocked(showToolEditor).mockResolvedValue({
       name: "run_tests",
       command: "npm test --watch",
@@ -411,6 +412,10 @@ describe("handleEdit", () => {
 
     // No confirmation select
     expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(buildToolFromResult).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "run_tests", command: "npm test --watch" }),
+      { env: existingTool.env, envFrom: existingTool.envFrom },
+    );
     expect(saveConfig).toHaveBeenCalledWith(updatedTool, "project", "/project");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });

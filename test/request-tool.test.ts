@@ -239,6 +239,14 @@ describe("buildToolFromResult", () => {
     destination: "session",
   };
 
+  it("preserves env sets alongside inline env bindings", () => {
+    const envFrom = ["common", "extra"];
+    const env = { INLINE: "value" };
+    const tool = buildToolFromResult(baseResult, { envFrom, env });
+    expect(tool.envFrom).toEqual(envFrom);
+    expect(tool.env).toEqual(env);
+  });
+
   it("preserves the when condition on the built tool", () => {
     const tool = buildToolFromResult({ ...baseResult, when: "jj" });
     expect(tool.when).toBe("jj");
