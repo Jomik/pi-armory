@@ -313,17 +313,22 @@ export function toolFormPanel(
       const envLabel = "Env sets:".padEnd(LABEL);
       const options = envOptions();
       lines.push("");
-      lines.push(` ${focus === 7 ? theme.fg("accent", envLabel) : theme.fg("muted", envLabel)} ${
-        options.length
-          ? options
-              .map((name, i) => {
-                const mark = envFrom.includes(name) ? "☑" : "☐";
-                const status = envFrom.includes(name) && unresolved(name) ? " (unresolved)" : "";
-                return `${focus === 7 && envSelection % options.length === i ? "› " : ""}${mark} ${name}${status}`;
-              })
-              .join("  ")
-          : theme.fg("dim", "(none)")
-      }`);
+      lines.push(` ${focus === 7 ? theme.fg("accent", envLabel) : theme.fg("muted", envLabel)}`);
+      if (options.length === 0) {
+        lines.push(`    ${theme.fg("dim", "(none)")}`);
+      } else {
+        for (let i = 0; i < options.length; i++) {
+          const name = options[i];
+          const selected = envFrom.includes(name);
+          const mark = selected ? "☑" : "☐";
+          const status = selected && unresolved(name) ? " (unresolved)" : "";
+          const cursor = focus === 7 && envSelection % options.length === i ? "›" : " ";
+          const wrapped = wrapTextWithAnsi(`${name}${status}`, Math.max(width - 4, 1));
+          for (let j = 0; j < wrapped.length; j++) {
+            lines.push(j === 0 ? ` ${cursor}${mark} ${wrapped[j]}` : `    ${wrapped[j]}`);
+          }
+        }
+      }
       if (envFrom.some(unresolved)) {
         lines.push(
           ` ${theme.fg("error", "Unresolved env sets: deselect, then reselect in the target destination before approval")}`,

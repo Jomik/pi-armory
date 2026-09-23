@@ -211,6 +211,26 @@ describe("toolFormPanel env set selection", () => {
     for (let i = 0; i < 7; i++) panel.handleInput("\t");
   }
 
+  it("shows the focused last env set at narrow width without exposing definitions", () => {
+    const sets: EnvSets = {
+      alpha: { TOKEN: { command: "private-resolver", secret: true } },
+      beta: { COLOR: "blue" },
+      gamma: { COLOR: "green" },
+      delta: { COLOR: "red" },
+    };
+    const { panel } = makePanel([], undefined, undefined, { destination: "project", envSets: { project: sets } });
+    focusEnv(panel);
+    for (let i = 0; i < 3; i++) panel.handleInput("\x1b[C");
+
+    const rendered = panel.render(20).join("\n");
+    expect(rendered).toMatch(/ ☐ alpha\n/);
+    expect(rendered).toMatch(/ ☐ beta\n/);
+    expect(rendered).toMatch(/ ☐ gamma\n/);
+    expect(rendered).toContain(" ›☐ delta");
+    expect(rendered).not.toContain("private-resolver");
+    expect(rendered).not.toContain("TOKEN");
+  });
+
   it("selects multiple sets by name and returns an explicit empty array when cleared", () => {
     const { panel, getResult } = makePanel([], undefined, undefined, { destination: "project", envSets: { project } });
     focusEnv(panel);
