@@ -421,9 +421,7 @@ describe("handleOnboard — per-candidate flow", () => {
     sessionRegistry.set("run_tests", { name: "old", command: "echo old", description: "Old tool" });
     const pi = makePi();
     const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
-    await expect(handleOnboard(pi as never, ctx as never, "/project", "provider:model")).rejects.toThrow(
-      "Selected env set changed",
-    );
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
     expect(showToolEditor).toHaveBeenCalledWith(
       ctx,
       expect.objectContaining({ envSets: { project: {}, global: { common: { TOKEN: "value" } } } }),
@@ -440,6 +438,61 @@ describe("handleOnboard — per-candidate flow", () => {
     expect(registerArmoryTool).not.toHaveBeenCalled();
     expect(sessionRegistry.get("run_tests")).toEqual({ name: "old", command: "echo old", description: "Old tool" });
     expect(syncToolCondition).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': save failed", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Onboarding complete: 0 registered, 1 skipped.", "info");
+    expect(vi.mocked(ctx.ui.notify).mock.calls.flat().join(" ")).not.toContain("Selected env set changed");
+  });
+
+  it("continues after a failed save without mutating the failed candidate's registry or file", async () => {
+    const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
+    const lintTool = { name: "lint", command: "biome check", description: "Lint the codebase" };
+    const oldTool = { name: "old", command: "echo old", description: "Old tool" };
+    const savedFiles = new Map<string, unknown>([["run_tests", oldTool]]);
+    sessionRegistry.set("run_tests", oldTool);
+    vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
+    vi.mocked(mockDraft)
+      .mockResolvedValueOnce(sampleDraft)
+      .mockResolvedValueOnce({ ...sampleDraft, name: "lint", command: "biome check" });
+    vi.mocked(showToolEditor)
+      .mockResolvedValueOnce(sampleEditorResult)
+      .mockResolvedValueOnce({ ...sampleEditorResult, name: "lint", command: "biome check" });
+    vi.mocked(buildToolFromResult)
+      .mockReturnValueOnce({ name: "run_tests", command: "npm test", description: "Run tests" })
+      .mockReturnValueOnce(lintTool);
+    vi.mocked(saveConfig)
+      .mockRejectedValueOnce(new Error("secret resolver output"))
+      .mockImplementationOnce(async (tool) => {
+        savedFiles.set(tool.name, tool);
+        return {};
+      });
+
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Select all", "Confirm"] });
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(saveConfig).toHaveBeenCalledTimes(2);
+    expect(savedFiles.get("run_tests")).toBe(oldTool);
+    expect(savedFiles.get("lint")).toBe(lintTool);
+    expect(sessionRegistry.get("run_tests")).toBe(oldTool);
+    expect(registerArmoryTool).toHaveBeenCalledTimes(1);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, lintTool, {});
+    expect(syncToolCondition).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': save failed", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Onboarding complete: 1 registered, 1 skipped.", "info");
+    expect(vi.mocked(ctx.ui.notify).mock.calls.flat().join(" ")).not.toContain("secret resolver output");
+  });
+
+  it("rethrows save cancellation without registering or summarizing", async () => {
+    const abort = new Error("cancelled");
+    abort.name = "AbortError";
+    vi.mocked(saveConfig).mockRejectedValue(abort);
+    vi.mocked(showToolEditor).mockResolvedValue(sampleEditorResult);
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+
+    await expect(handleOnboard(pi as never, ctx as never, "/project", "provider:model")).rejects.toBe(abort);
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith(expect.stringContaining("Onboarding complete"), "info");
   });
 
   it("skips a candidate when user rejects in editor and continues", async () => {

@@ -264,11 +264,18 @@ async function processCandidate(
     ...(result.destination === "session" ? { envFrom: [] } : {}),
   });
 
-  // Save and register — identical logic to request_tool
+  // Save before changing the registry; a failed save skips only this candidate.
   if (result.destination === "session") {
     registerArmoryTool(pi, tool);
   } else {
-    const savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+    let savedSets;
+    try {
+      savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") throw err;
+      ctx.ui.notify(`Skipped '${candidate.label}': save failed`, "info");
+      return "skipped";
+    }
     sessionRegistry.delete(tool.name);
     registerArmoryTool(pi, tool, savedSets);
   }
