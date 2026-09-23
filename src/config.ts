@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
-import type { ArmoryConfig, ArmoryTool } from "./schema.js";
+import type { ArmoryConfig, ArmoryTool, EnvBinding } from "./schema.js";
 import { ArmoryConfigSchema } from "./schema.js";
 
 export type { ArmoryConfig, ArmoryTool, EnvBinding } from "./schema.js";
@@ -22,15 +22,48 @@ function parseToolsJson(content: string, filePath: string, onInvalid: string): A
     console.warn(`pi-armory: invalid JSON in ${filePath}, ${onInvalid}`);
     return null;
   }
-  if (!Value.Check(ArmoryConfigSchema, parsed)) {
-    const errors = [...Value.Errors(ArmoryConfigSchema, parsed)];
-    const first = errors[0];
-    console.warn(
-      `pi-armory: invalid config in ${filePath}${first ? `: ${first.instancePath || "/"}: ${first.message}` : ""}, ${onInvalid}`,
-    );
+  try {
+    validateConfig(parsed);
+  } catch (err) {
+    console.warn(`pi-armory: invalid config in ${filePath}: ${(err as Error).message}, ${onInvalid}`);
     return null;
   }
-  return parsed;
+  return parsed as ArmoryConfig;
+}
+
+export type EnvSets = NonNullable<ArmoryConfig["envSets"]>;
+
+/** Validate and assemble bindings without resolving values or changing the stored tool. */
+export function validateEffectiveBindings(tool: ArmoryTool, envSets: EnvSets): Record<string, EnvBinding> {
+  const bindings = new Map<string, EnvBinding>();
+  const selected = new Set<string>();
+  for (const name of tool.envFrom ?? []) {
+    if (selected.has(name)) throw new Error(`tool ${tool.name}: repeated envFrom set ${name}`);
+    selected.add(name);
+    if (!Object.hasOwn(envSets, name)) throw new Error(`tool ${tool.name}: unknown envFrom set ${name}`);
+    for (const [key, binding] of Object.entries(envSets[name])) {
+      if (bindings.has(key)) throw new Error(`tool ${tool.name}: duplicate environment variable ${key}`);
+      bindings.set(key, binding);
+    }
+  }
+  for (const [key, binding] of Object.entries(tool.env ?? {})) {
+    if (bindings.has(key)) throw new Error(`tool ${tool.name}: duplicate environment variable ${key}`);
+    bindings.set(key, binding);
+  }
+  return Object.fromEntries(bindings);
+}
+
+function validateConfig(config: unknown): asserts config is ArmoryConfig {
+  if (!Value.Check(ArmoryConfigSchema, config)) {
+    const first = [...Value.Errors(ArmoryConfigSchema, config)][0];
+    throw new Error(`${first?.instancePath || "/"}: ${first?.message ?? "schema mismatch"}`);
+  }
+  const names = new Set<string>();
+  for (const tool of config.tools) {
+    if (names.has(tool.name)) throw new Error(`duplicate tool name ${tool.name}`);
+    names.add(tool.name);
+    validateEffectiveBindings(tool, config.envSets ?? {});
+  }
 }
 
 function resolveConfigPath(destination: "project" | "global", projectRoot: string, agentDir: string): string {
@@ -55,7 +88,7 @@ export function loadProjectToolNamesSync(projectRoot: string): string[] {
   return config.tools.map((tool) => tool.name).sort((a, b) => a.localeCompare(b));
 }
 
-async function readConfigFile(filePath: string): Promise<ArmoryConfig> {
+async function readConfigFile(filePath: string): Promise<ArmoryConfig | null> {
   let content: string;
   try {
     content = await readFile(filePath, "utf-8");
@@ -63,7 +96,18 @@ async function readConfigFile(filePath: string): Promise<ArmoryConfig> {
     if (isEnoent(err)) return { tools: [] };
     throw err;
   }
-  return parseToolsJson(content, filePath, "ignoring") ?? { tools: [] };
+  return parseToolsJson(content, filePath, "ignoring");
+}
+
+export async function getDestinationEnvSets(
+  destination: PersistedToolSource,
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<EnvSets> {
+  const filePath = resolveConfigPath(destination, projectRoot, agentDir);
+  const config = await readConfigFile(filePath);
+  if (!config) throw new Error(`Invalid config in ${filePath}; refusing to use its env sets`);
+  return config.envSets ?? {};
 }
 
 async function writeConfigFile(filePath: string, config: ArmoryConfig): Promise<void> {
@@ -80,9 +124,9 @@ export async function loadConfig(
 
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
-  const merged = mergePersistedToolsWithSource(globalResult.tools, projectResult.tools);
-  const draftModel = projectResult.draftModel ?? globalResult.draftModel;
-  const disableBash = globalResult.disableBash ?? true;
+  const merged = mergePersistedToolsWithSource(globalResult?.tools ?? [], projectResult?.tools ?? []);
+  const draftModel = projectResult?.draftModel ?? globalResult?.draftModel;
+  const disableBash = globalResult?.disableBash ?? true;
 
   return {
     tools: Array.from(merged.values())
@@ -115,7 +159,7 @@ export async function loadToolsWithSource(
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
-  const merged = mergePersistedToolsWithSource(globalResult.tools, projectResult.tools);
+  const merged = mergePersistedToolsWithSource(globalResult?.tools ?? [], projectResult?.tools ?? []);
 
   return Array.from(merged.values()).sort((a, b) => a.tool.name.localeCompare(b.tool.name));
 }
@@ -131,10 +175,10 @@ export async function loadToolWithSource(
   const [globalResult, projectResult] = await Promise.all([readConfigFile(globalPath), readConfigFile(projectPath)]);
 
   // Project overrides global
-  const projectTool = projectResult.tools.find((t) => t.name === name);
+  const projectTool = projectResult?.tools.find((t) => t.name === name);
   if (projectTool) return { tool: projectTool, source: "project" };
 
-  const globalTool = globalResult.tools.find((t) => t.name === name);
+  const globalTool = globalResult?.tools.find((t) => t.name === name);
   if (globalTool) return { tool: globalTool, source: "global" };
 
   return null;
@@ -148,6 +192,7 @@ export async function removeFromConfig(
 ): Promise<void> {
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
+  if (!config) throw new Error(`Invalid config in ${filePath}; refusing to modify it`);
   const tools = config.tools.filter((t) => t.name !== toolName);
   if (tools.length === config.tools.length) return; // nothing to remove
   await writeConfigFile(filePath, { ...config, tools });
@@ -161,6 +206,7 @@ export async function saveConfig(
 ): Promise<void> {
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
+  if (!config) throw new Error(`Invalid config in ${filePath}; refusing to modify it`);
   const tools = [...config.tools];
   const idx = tools.findIndex((t) => t.name === tool.name);
   if (idx >= 0) {
@@ -168,5 +214,7 @@ export async function saveConfig(
   } else {
     tools.push(tool);
   }
-  await writeConfigFile(filePath, { ...config, tools });
+  const updated = { ...config, tools };
+  validateConfig(updated);
+  await writeConfigFile(filePath, updated);
 }

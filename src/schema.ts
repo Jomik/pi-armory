@@ -7,18 +7,14 @@ const EnvBindingSchema = Type.Union([
   Type.Object(
     {
       env: Type.String({ minLength: 1, description: "Name of a host environment variable to read." }),
-      secret: Type.Optional(
-        Type.Boolean({ description: "Redact the resolved value from all tool output." }),
-      ),
+      secret: Type.Optional(Type.Boolean({ description: "Redact the resolved value from all tool output." })),
     },
     { additionalProperties: false, description: "Resolves from the host process environment." },
   ),
   Type.Object(
     {
       command: Type.String({ minLength: 1, description: "Shell command whose trimmed stdout becomes the value." }),
-      secret: Type.Optional(
-        Type.Boolean({ description: "Redact the resolved value from all tool output." }),
-      ),
+      secret: Type.Optional(Type.Boolean({ description: "Redact the resolved value from all tool output." })),
     },
     { additionalProperties: false, description: "Resolves by running a shell command." },
   ),
@@ -41,6 +37,7 @@ const ArmoryToolSchema = Type.Object(
           "resolved value from all tool output.",
       }),
     ),
+    envFrom: Type.Optional(Type.Array(Type.String(), { description: "Names of envSets in this config to use." })),
     when: Type.Optional(
       Type.Union([Type.Literal("git"), Type.Literal("jj")], {
         description:
@@ -57,6 +54,11 @@ export const ArmoryConfigSchema = Type.Object({
   $schema: Type.Optional(Type.String()),
   draftModel: Type.Optional(Type.String()),
   disableBash: Type.Optional(Type.Boolean()),
+  envSets: Type.Optional(
+    Type.Record(Type.String(), Type.Record(Type.String(), EnvBindingSchema), {
+      description: "Named environment bindings available to tools in this config via envFrom.",
+    }),
+  ),
   tools: Type.Array(ArmoryToolSchema),
 });
 

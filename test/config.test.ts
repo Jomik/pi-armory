@@ -1,14 +1,17 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ArmoryConfigSchema } from "../src/schema.js";
 import type { ArmoryTool } from "../src/config.js";
 import {
+  getDestinationEnvSets,
   loadConfig,
   loadProjectToolNamesSync,
   loadToolWithSource,
   removeFromConfig,
   saveConfig,
+  validateEffectiveBindings,
 } from "../src/config.js";
 
 let tmpDir: string;
@@ -115,6 +118,123 @@ describe("loadConfig", () => {
     );
     const result = await loadConfig(projectRoot, fakeAgentDir);
     expect(result.draftModel).toBe("project-model");
+  });
+});
+
+describe("shared environment sets", () => {
+  const globalPath = () => path.join(fakeAgentDir, "armory.json");
+  const projectPath = () => path.join(projectRoot, ".pi", "armory.json");
+  const sets = {
+    common: { HOST: "public", TOKEN: { env: "TOKEN_SOURCE", secret: true } },
+    extra: { REGION: { command: "echo region" } },
+  };
+
+  it("loads mixed set and inline bindings without changing the tool definition or source precedence", async () => {
+    const globalTool = { ...toolA, envFrom: ["common", "extra"], env: { INLINE: "value" }, when: "git" } as ArmoryTool;
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify({ envSets: sets, tools: [globalTool, toolB] }));
+    await writeProject([toolAOverride]);
+    expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([toolAOverride, toolB]);
+    expect(await getDestinationEnvSets("global", projectRoot, fakeAgentDir)).toEqual(sets);
+    expect(await getDestinationEnvSets("project", projectRoot, fakeAgentDir)).toEqual({});
+    expect(validateEffectiveBindings(globalTool, sets)).toEqual({ ...sets.common, ...sets.extra, INLINE: "value" });
+    expect((await loadToolWithSource("tool-a", projectRoot, fakeAgentDir))?.tool).toEqual(toolAOverride);
+  });
+
+  it.each([
+    ["duplicate tool names", { tools: [toolA, toolA] }, "duplicate tool name"],
+    ["unknown set", { tools: [{ ...toolA, envFrom: ["missing"] }] }, "unknown envFrom"],
+    ["repeated set", { envSets: sets, tools: [{ ...toolA, envFrom: ["common", "common"] }] }, "repeated envFrom"],
+    [
+      "set overlap",
+      { envSets: { first: { KEY: "a" }, second: { KEY: "b" } }, tools: [{ ...toolA, envFrom: ["first", "second"] }] },
+      "duplicate environment",
+    ],
+    [
+      "inline overlap",
+      { envSets: sets, tools: [{ ...toolA, envFrom: ["common"], env: { HOST: "override" } }] },
+      "duplicate environment",
+    ],
+    [
+      "malformed set binding",
+      { envSets: { bad: { KEY: { env: "HOST", command: "echo" } } }, tools: [toolA] },
+      "invalid config",
+    ],
+  ])("rejects entire file for %s with a warning, leaving the other destination intact", async (_label, invalid, message) => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify(invalid));
+    await writeProject([toolB]);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([toolB]);
+      expect(loadProjectToolNamesSync(projectRoot)).toEqual(["tool-b"]);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining(message));
+      await expect(getDestinationEnvSets("global", projectRoot, fakeAgentDir)).rejects.toThrow("Invalid config");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("does not resolve a global set from a project tool, even if a global tool has the same name", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify({ envSets: sets, tools: [{ ...toolA, envFrom: ["common"] }] }));
+    await mkdir(path.dirname(projectPath()), { recursive: true });
+    await writeFile(projectPath(), JSON.stringify({ tools: [{ ...toolAOverride, envFrom: ["common"] }] }));
+    expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([{ ...toolA, envFrom: ["common"] }]);
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+  });
+
+  it("refuses malformed and semantic-invalid files or tool updates without modifying them", async () => {
+    for (const contents of ["{broken", JSON.stringify({ tools: [toolA, toolA] })]) {
+      await mkdir(path.dirname(projectPath()), { recursive: true });
+      await writeFile(projectPath(), contents);
+      await expect(saveConfig(toolB, "project", projectRoot, fakeAgentDir)).rejects.toThrow("Invalid config");
+      expect(await readFile(projectPath(), "utf-8")).toBe(contents);
+    }
+    const original = JSON.stringify({ tools: [toolA], envSets: sets });
+    await writeFile(projectPath(), original);
+    for (const invalid of [
+      { ...toolB, envFrom: ["unknown"] },
+      { ...toolB, envFrom: ["common", "common"] },
+      { ...toolB, envFrom: ["common"], env: { HOST: "collision" } },
+      { ...toolB, when: "svn" },
+      { ...toolB, secrets: { KEY: "legacy" } },
+    ]) {
+      await expect(saveConfig(invalid as ArmoryTool, "project", projectRoot, fakeAgentDir)).rejects.toThrow();
+      expect(await readFile(projectPath(), "utf-8")).toBe(original);
+    }
+    await saveConfig(
+      { ...toolB, envFrom: ["common", "extra"], env: { INLINE: "ok" } },
+      "project",
+      projectRoot,
+      fakeAgentDir,
+    );
+    expect(JSON.parse(await readFile(projectPath(), "utf-8"))).toEqual({
+      tools: [toolA, { ...toolB, envFrom: ["common", "extra"], env: { INLINE: "ok" } }],
+      envSets: sets,
+    });
+  });
+
+  it("does not create a destination file for an invalid tool", async () => {
+    const projectPath = path.join(projectRoot, ".pi", "armory.json");
+    await expect(saveConfig({ ...toolA, envFrom: ["missing"] }, "project", projectRoot, fakeAgentDir)).rejects.toThrow(
+      "unknown envFrom",
+    );
+    await expect(readFile(projectPath, "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps the shipped JSON schema in sync with TypeBox", async () => {
+    const shipped = JSON.parse(await readFile(new URL("../armory.schema.json", import.meta.url), "utf-8"));
+    expect(shipped).toEqual(
+      JSON.parse(
+        JSON.stringify({
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          $id: "https://raw.githubusercontent.com/Jomik/pi-armory/main/armory.schema.json",
+          title: "Armory Config",
+          ...ArmoryConfigSchema,
+        }),
+      ),
+    );
   });
 });
 
