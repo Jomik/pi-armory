@@ -389,6 +389,46 @@ describe("handleEdit", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
   });
 
+  it("refuses a confirmed project → global move when the destination name already belongs to another tool", async () => {
+    const existingGlobal: ArmoryTool = {
+      ...toolProject,
+      command: "echo global-existing",
+      description: "Existing global tool",
+    };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+    vi.mocked(loadToolInDestination).mockResolvedValue(existingGlobal);
+    vi.mocked(showToolEditor).mockResolvedValue({
+      ...toolProject,
+      guidelines: [],
+      requiresApproval: false,
+      destination: "global",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue(toolProject);
+    toolRegistry.set(toolProject.name, toolProject);
+    const pi = makePi();
+    const deps = makeDeps({ tools: [toolProject] });
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
+    registerArmoryCommand(pi as never, deps);
+    await getHandler(pi)("edit run_tests", ctx as never);
+
+    expect(ctx.ui.select).toHaveBeenCalledOnce();
+    expect(loadToolInDestination).toHaveBeenCalledWith("run_tests", "global", "/project");
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(syncToolCondition).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+    expect(deps.tools).toEqual([toolProject]);
+    expect(toolRegistry.get("run_tests")).toBe(toolProject);
+    expect(loadToolInDestination).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/already exists|name collision|name.*in use/i),
+      "error",
+    );
+    expect(ctx.ui.notify.mock.calls[0][0]).toMatch(/rename|different name|remove.*existing/i);
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toContain("echo global-existing");
+  });
+
   it("does not write when the destination snapshot cannot be loaded", async () => {
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
     vi.mocked(loadToolInDestination).mockRejectedValue(new Error("secret destination detail"));
