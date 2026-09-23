@@ -943,14 +943,14 @@ describe("handleEdit", () => {
     expect(registerArmoryTool).not.toHaveBeenCalled();
   });
 
-  it("deactivates a renamed session name if revealing the persisted tool fails", async () => {
+  it("reports a renamed session tool when revealing the persisted tool fails and syncs its condition", async () => {
     const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
-    const renamedTool: ArmoryTool = { ...oldTool, name: "renamed_tests" };
+    const renamedTool: ArmoryTool = { ...oldTool, name: "renamed_tests", when: "jj" };
     sessionRegistry.set(oldTool.name, oldTool);
     approvalRegistry.set(oldTool.name, oldTool);
     toolRegistry.set(oldTool.name, oldTool);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "global" });
-    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
+    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("secret resolver detail"));
     vi.mocked(showToolEditor).mockResolvedValue({
       name: renamedTool.name,
       command: renamedTool.command,
@@ -958,24 +958,36 @@ describe("handleEdit", () => {
       guidelines: [],
       requiresApproval: true,
       destination: "session",
+      when: "jj",
     });
     vi.mocked(buildToolFromResult).mockReturnValue(renamedTool);
 
     const pi = makePi();
-    let active = pi.getActiveTools();
+    let active = [...pi.getActiveTools(), renamedTool.name];
     pi.getActiveTools.mockImplementation(() => active);
     pi.setActiveTools.mockImplementation((names) => {
       active = names;
     });
+    vi.mocked(syncToolCondition).mockImplementationOnce((_pi, _cwd, conditionalTool) => {
+      if (conditionalTool.when) pi.setActiveTools(pi.getActiveTools().filter((name) => name !== conditionalTool.name));
+    });
+    const ctx = makeCtx();
     registerArmoryCommand(pi as never, makeDeps());
-    await expect(getHandler(pi)("edit run_tests", makeCtx() as never)).rejects.toThrow("invalid config");
+    await getHandler(pi)("edit run_tests", ctx as never);
 
     expect(sessionRegistry.has(oldTool.name)).toBe(false);
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, renamedTool);
     expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
+    expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, renamedTool);
     expect(active).not.toContain(oldTool.name);
+    expect(active).not.toContain(renamedTool.name);
     expect(toolRegistry.has(oldTool.name)).toBe(false);
     expect(approvalRegistry.has(oldTool.name)).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/renamed_tests.*updated.*shadowed previous name could not be restored.*fix the config/i),
+      "error",
+    );
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toMatch(/secret resolver detail/);
   });
 
   it("aborts without changes when the edited name is invalid/empty", async () => {
@@ -1440,13 +1452,13 @@ describe("handleDelete", () => {
     expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, conditionedTool);
   });
 
-  it("deactivates a deleted name if revealing the persisted tool fails", async () => {
+  it("reports a deleted name if revealing the persisted tool fails", async () => {
     const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
     sessionRegistry.set(oldTool.name, oldTool);
     approvalRegistry.set(oldTool.name, oldTool);
     toolRegistry.set(oldTool.name, oldTool);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "global" });
-    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
+    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("secret resolver detail"));
 
     const pi = makePi();
     let active = pi.getActiveTools();
@@ -1454,10 +1466,9 @@ describe("handleDelete", () => {
     pi.setActiveTools.mockImplementation((names) => {
       active = names;
     });
+    const ctx = makeCtx({ selectResponses: ["Delete"] });
     registerArmoryCommand(pi as never, makeDeps());
-    await expect(getHandler(pi)("delete run_tests", makeCtx({ selectResponses: ["Delete"] }) as never)).rejects.toThrow(
-      "invalid config",
-    );
+    await getHandler(pi)("delete run_tests", ctx as never);
 
     expect(sessionRegistry.has(oldTool.name)).toBe(false);
     expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
@@ -1465,6 +1476,11 @@ describe("handleDelete", () => {
     expect(active).not.toContain(oldTool.name);
     expect(toolRegistry.has(oldTool.name)).toBe(false);
     expect(approvalRegistry.has(oldTool.name)).toBe(false);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringMatching(/run_tests.*deleted.*shadowed previous name could not be restored.*fix the config/i),
+      "error",
+    );
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toMatch(/secret resolver detail/);
   });
 
   it("deletes a global tool — confirmation mentions global config", async () => {

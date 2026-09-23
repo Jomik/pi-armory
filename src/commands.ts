@@ -408,13 +408,25 @@ async function handleEdit(
   }
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
+  let restoreFailed = false;
   if (destName !== sourceName) {
-    await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot, ctx.cwd);
+    try {
+      await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot, ctx.cwd);
+    } catch {
+      restoreFailed = true;
+    }
   }
 
   // Sync the (re)registered tool's active state with its condition for this workspace.
   syncToolCondition(pi, ctx.cwd, updatedTool);
 
+  if (restoreFailed) {
+    ctx.ui.notify(
+      `Tool '${updatedTool.name}' updated, but the shadowed previous name could not be restored. Inspect and fix the config.`,
+      "error",
+    );
+    return;
+  }
   ctx.ui.notify(`Tool '${updatedTool.name}' updated`, "info");
 }
 
@@ -476,7 +488,15 @@ async function handleDelete(
   }
 
   // Deactivate before attempting to reveal a lower-precedence persisted tool.
-  await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
+  try {
+    await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
+  } catch {
+    ctx.ui.notify(
+      `Tool '${tool.name}' deleted, but the shadowed previous name could not be restored. Inspect and fix the config.`,
+      "error",
+    );
+    return;
+  }
 
   ctx.ui.notify(`Tool '${tool.name}' deleted`, "info");
 }
