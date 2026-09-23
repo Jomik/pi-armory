@@ -7,6 +7,7 @@ import {
   getDestinationEnvSets,
   loadConfig,
   loadProjectToolNamesSync,
+  loadToolInDestination,
   loadToolWithSource,
   removeFromConfig,
   saveConfig,
@@ -399,6 +400,40 @@ describe("loadToolWithSource", () => {
     await writeProject([toolB]);
     const result = await loadToolWithSource("tool-a", projectRoot, fakeAgentDir);
     expect(result).toEqual({ tool: toolA, source: "global" });
+  });
+});
+
+describe("loadToolInDestination", () => {
+  it("reads only the selected scope even when project overrides global", async () => {
+    await writeGlobal([toolA, toolB]);
+    await writeProject([toolAOverride]);
+    expect(await loadToolInDestination("tool-a", "global", projectRoot, fakeAgentDir)).toEqual(toolA);
+    expect(await loadToolInDestination("tool-a", "project", projectRoot, fakeAgentDir)).toEqual(toolAOverride);
+    expect(await loadToolInDestination("tool-b", "project", projectRoot, fakeAgentDir)).toBeNull();
+  });
+
+  it.each(["project", "global"] as const)("returns null for missing %s file or tool", async (destination) => {
+    expect(await loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).toBeNull();
+    if (destination === "project") await writeProject([toolB]);
+    else await writeGlobal([toolB]);
+    expect(await loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).toBeNull();
+  });
+
+  it.each(["project", "global"] as const)("throws for invalid %s config instead of falling back", async (destination) => {
+    if (destination === "project") {
+      await writeGlobal([toolA]);
+    } else {
+      await writeProject([toolAOverride]);
+    }
+    const filePath =
+      destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(fakeAgentDir, "armory.json");
+    await mkdir(path.dirname(filePath), { recursive: true });
+    for (const content of ["{bad json", JSON.stringify({ tools: [toolA, toolA] })]) {
+      await writeFile(filePath, content);
+      await expect(loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).rejects.toThrow(
+        "Invalid config",
+      );
+    }
   });
 });
 

@@ -100,6 +100,18 @@ async function readConfigFile(filePath: string): Promise<ArmoryConfig | null> {
   return parseToolsJson(content, filePath, "ignoring");
 }
 
+export async function loadToolInDestination(
+  name: string,
+  destination: PersistedToolSource,
+  projectRoot: string,
+  agentDir: string = getAgentDir(),
+): Promise<ArmoryTool | null> {
+  const filePath = resolveConfigPath(destination, projectRoot, agentDir);
+  const config = await readConfigFile(filePath);
+  if (!config) throw new Error(`Invalid config in ${filePath}; refusing to inspect its tools`);
+  return config.tools.find((tool) => tool.name === name) ?? null;
+}
+
 export async function getDestinationEnvSets(
   destination: PersistedToolSource,
   projectRoot: string,
