@@ -271,7 +271,13 @@ describe("saveConfig", () => {
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, JSON.stringify({ tools: [], envSets: destinationSets }));
 
-    const result = await saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, expected);
+    const result = await saveConfig(
+      { ...toolA, envFrom: ["selected"] },
+      "project",
+      projectRoot,
+      fakeAgentDir,
+      expected,
+    );
 
     expect(result).toEqual(destinationSets);
     expect(JSON.parse(await readFile(filePath, "utf-8"))).toEqual({
@@ -288,7 +294,7 @@ describe("saveConfig", () => {
   ])("rejects a changed selected set (%s) without writing", async (_case, destinationSets) => {
     const filePath = path.join(projectRoot, ".pi", "armory.json");
     const expected = { selected: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } };
-    const original = JSON.stringify({ tools: [toolB], envSets: destinationSets }, null, 2) + "\n";
+    const original = `${JSON.stringify({ tools: [toolB], envSets: destinationSets }, null, 2)}\n`;
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, original);
 
