@@ -346,4 +346,28 @@ describe("schema validation", () => {
     const result = await loadConfig(projectRoot, fakeAgentDir);
     expect(result.tools).toEqual([tool]);
   });
+
+  it("accepts tool with when: git", async () => {
+    const tool = { name: "git-only", command: "echo", description: "d", when: "git" };
+    await writeGlobal([tool as ArmoryTool]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([tool]);
+  });
+
+  it("accepts tool with when: jj", async () => {
+    const tool = { name: "jj-only", command: "echo", description: "d", when: "jj" };
+    await writeGlobal([tool as ArmoryTool]);
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([tool]);
+  });
+
+  it("rejects tool with unknown when value", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", when: "svn" }] }, null, 2),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
 });

@@ -10,7 +10,7 @@ function plainTheme(): Theme {
   } as Theme;
 }
 
-function makePanel(guidelines: string[] = [], callbacks?: Parameters<typeof toolFormPanel>[4]) {
+function makePanel(guidelines: string[] = [], callbacks?: Parameters<typeof toolFormPanel>[4], when?: "git" | "jj") {
   let result: ToolFormResult | undefined;
   const tui = { requestRender: vi.fn() } as unknown as TUI;
   const panel = toolFormPanel(
@@ -27,6 +27,7 @@ function makePanel(guidelines: string[] = [], callbacks?: Parameters<typeof tool
       guidelines,
       requiresApproval: false,
       destination: "session",
+      ...(when ? { when } : {}),
     },
     callbacks,
   );
@@ -130,7 +131,7 @@ describe("toolFormPanel guideline editing", () => {
 });
 
 function focusRedraft(panel: ReturnType<typeof makePanel>["panel"]) {
-  for (let i = 0; i < 6; i++) panel.handleInput("\t"); // name -> ... -> re-draft
+  for (let i = 0; i < 7; i++) panel.handleInput("\t"); // name -> ... -> condition -> re-draft
 }
 
 describe("toolFormPanel re-draft", () => {
@@ -190,5 +191,66 @@ describe("toolFormPanel re-draft", () => {
 
     expect(onRedraft).toHaveBeenCalledOnce();
     expect(getResult()?.command).toBe("npm test");
+  });
+});
+
+describe("toolFormPanel condition", () => {
+  it("returns the initial when unchanged when approved without touching the condition field", () => {
+    const { panel, getResult } = makePanel([], undefined, "jj");
+
+    for (let i = 0; i < 4; i++) panel.handleInput("\t"); // name -> ... -> approval
+    panel.handleInput("\r"); // approve
+
+    expect(getResult()?.when).toBe("jj");
+  });
+
+  it("Condition control cycles Always -> Git -> Jj -> Always", () => {
+    const { panel, getResult } = makePanel();
+
+    for (let i = 0; i < 6; i++) panel.handleInput("\t"); // name -> ... -> condition
+    panel.handleInput("\x1b[C"); // Always -> Git
+    let rendered = panel.render(100).join("\n");
+    expect(rendered).toMatch(/● Git/);
+
+    panel.handleInput("\x1b[C"); // Git -> Jj
+    rendered = panel.render(100).join("\n");
+    expect(rendered).toMatch(/● Jj/);
+
+    panel.handleInput("\x1b[C"); // Jj -> Always
+    panel.handleInput("\r"); // approve
+
+    expect(getResult()?.when).toBeUndefined();
+  });
+
+  it("redraft can set a when value", async () => {
+    const onRedraft = vi.fn().mockResolvedValue({ when: "git" });
+    const { panel, getResult } = makePanel([], { onRedraft });
+    focusRedraft(panel);
+
+    panel.handleInput("\r"); // enter instruction mode
+    panel.handleInput("restrict to git repos");
+    panel.handleInput("\r"); // submit instruction, triggers onRedraft
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    panel.handleInput("\x1b[A"); // move focus off re-draft
+    panel.handleInput("\r"); // approve
+
+    expect(getResult()?.when).toBe("git");
+  });
+
+  it("redraft can clear an existing when value", async () => {
+    const onRedraft = vi.fn().mockResolvedValue({ when: undefined });
+    const { panel, getResult } = makePanel([], { onRedraft }, "git");
+    focusRedraft(panel);
+
+    panel.handleInput("\r"); // enter instruction mode
+    panel.handleInput("no longer git-specific");
+    panel.handleInput("\r"); // submit instruction, triggers onRedraft
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    panel.handleInput("\x1b[A"); // move focus off re-draft
+    panel.handleInput("\r"); // approve
+
+    expect(getResult()?.when).toBeUndefined();
   });
 });

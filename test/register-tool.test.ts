@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import { executeCommand } from "../src/executor.js";
 import { fetchSecret } from "../src/keychain.js";
-import { approvalRegistry, registerArmoryTool } from "../src/register-tool.js";
+import { approvalRegistry, registerArmoryTool, toolRegistry } from "../src/register-tool.js";
 
 vi.mock("../src/executor.js");
 vi.mock("../src/keychain.js");
@@ -65,6 +65,7 @@ describe("registerArmoryTool", () => {
     mockExecuteCommand.mockReset();
     mockFetchSecret.mockReset();
     approvalRegistry.clear();
+    toolRegistry.clear();
   });
 
   it("calls pi.registerTool with the correct name and description", () => {
@@ -155,6 +156,15 @@ describe("registerArmoryTool", () => {
     });
 
     expect(approvalRegistry.has("approval-tool")).toBe(false);
+  });
+
+  it("tracks the latest effective definition for a tool name in toolRegistry", () => {
+    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, baseTool);
+    expect(toolRegistry.get("my-tool")).toEqual(baseTool);
+
+    const updated = { ...baseTool, command: "echo updated" };
+    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, updated);
+    expect(toolRegistry.get("my-tool")).toEqual(updated);
   });
 
   it("passes an onUpdate wrapper to executeCommand that forwards updates", async () => {

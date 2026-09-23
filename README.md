@@ -79,6 +79,21 @@ Parameters are declared via template syntax in the command string:
 
 Values are shell-escaped before substitution. No separate `parameters` config field is needed.
 
+### Repository conditions
+
+Tools may declare an optional `when: "git" | "jj"` condition; omitted means the tool is always active. `when: "jj"` requires a Jujutsu workspace; `when: "git"` requires a Git workspace that isn't also a Jujutsu repository (jj takes precedence in colocated repos). A failed repository probe deactivates conditional tools rather than failing, and unknown `when` values make the config invalid.
+
+```json
+{
+  "name": "jj_status",
+  "command": "jj st",
+  "description": "Show jj status",
+  "when": "jj"
+}
+```
+
+Conditions are re-evaluated when a session starts and applied immediately whenever a tool is created, edited, onboarded, or revealed. The tool review form exposes an Always/Git/Jj toggle; the draft model only infers `git`/`jj` for commands genuinely specific to that backend.
+
 ### Bootstrapping
 
 Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via the single Pi TUI custom form (inline field editing, guidelines, approval toggle, destination, re-draft, approve/reject). This requires Pi's TUI mode and is not supported in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.

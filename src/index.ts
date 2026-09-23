@@ -8,20 +8,44 @@ import {
   buildParamSchema,
   interpolateCommand,
   registerArmoryTool,
+  toolRegistry,
   validateToolParams,
 } from "./register-tool.js";
+import { detectRepositoryType, toolConditionMatches } from "./repository.js";
 import { registerRequestTool } from "./request-tool.js";
 
 const factory: ExtensionFactory = async (pi) => {
   const projectRoot = process.cwd();
   const { tools, draftModel, disableBash } = await loadConfig(projectRoot);
 
-  if (disableBash) {
-    pi.on("session_start", async (_event, _ctx) => {
-      const active = pi.getActiveTools().filter((name) => name !== "bash");
-      pi.setActiveTools(active);
+  pi.on("session_start", async (_event, ctx) => {
+    let active = pi.getActiveTools();
+
+    if (disableBash) {
+      active = active.filter((name) => name !== "bash");
+    }
+
+    const repoType = detectRepositoryType(ctx.cwd);
+    const conditionalTools = [...toolRegistry.values()].filter((tool) => tool.when);
+    const conditionalNames = new Set(conditionalTools.map((tool) => tool.name));
+
+    // Remove conditional tools whose condition no longer matches, preserving the order and
+    // state of all unrelated/unconditional names.
+    active = active.filter((name) => {
+      if (!conditionalNames.has(name)) return true;
+      const tool = conditionalTools.find((t) => t.name === name);
+      return tool ? toolConditionMatches(tool.when, repoType) : true;
     });
-  }
+
+    // Re-add conditional tools whose condition matches but that are not currently active.
+    for (const tool of conditionalTools) {
+      if (toolConditionMatches(tool.when, repoType) && !active.includes(tool.name)) {
+        active.push(tool.name);
+      }
+    }
+
+    pi.setActiveTools(active);
+  });
 
   for (const tool of tools) {
     registerArmoryTool(pi, tool);

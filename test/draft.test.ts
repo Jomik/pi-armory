@@ -200,6 +200,68 @@ describe("draftToolDefinition", () => {
   });
 });
 
+describe("draftToolDefinition — when field", () => {
+  it("accepts when: 'git'", async () => {
+    const toolDef = {
+      name: "jj_status",
+      command: "git status",
+      description: "Show git status",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+      when: "git",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(toolDef)));
+    const result = await draftToolDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      { command: "git status", reasoning: "check status" },
+    );
+    expect(result).toMatchObject({ when: "git" });
+  });
+
+  it("accepts when: 'jj'", async () => {
+    const toolDef = {
+      name: "jj_status",
+      command: "jj st",
+      description: "Show jj status",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+      when: "jj",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(toolDef)));
+    const result = await draftToolDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      { command: "jj st", reasoning: "check status" },
+    );
+    expect(result).toMatchObject({ when: "jj" });
+  });
+
+  it("falls back to the default DraftOutput when when is an unknown value", async () => {
+    const toolDef = {
+      name: "jj_status",
+      command: "jj st",
+      description: "Show jj status",
+      requires_approval: false,
+      guidelines: [],
+      destination: "project",
+      when: "svn",
+    };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(toolDef)));
+    const result = await draftToolDefinition(
+      fakeModel,
+      { apiKey: "test" },
+      { command: "jj st", reasoning: "check status" },
+    );
+    expect("rejected" in result).toBe(false);
+    const output = result as DraftOutput;
+    expect(output.when).toBeUndefined();
+    expect(output.destination).toBe("session");
+  });
+});
+
 describe("draftToolDefinition — systemPrompt metadata rules", () => {
   function captureSystemPrompt(): string {
     const calls = mockStreamSimple.mock.calls;
@@ -324,5 +386,50 @@ describe("reviseDraftDefinition — originalRequest plumbing", () => {
     const msg = captureUserMessage();
     expect(msg).toContain("Current definition:");
     expect(msg).toContain('"name": "run_tests"');
+  });
+});
+
+describe("reviseDraftDefinition — when field", () => {
+  const current: DraftOutput = {
+    name: "run_tests",
+    command: "npm test",
+    description: "Run the test suite",
+    requires_approval: false,
+    guidelines: [],
+    destination: "project",
+  };
+
+  it("accepts when: 'git'", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ ...current, when: "git" })));
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+    expect(result.when).toBe("git");
+  });
+
+  it("accepts when: 'jj'", async () => {
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ ...current, when: "jj" })));
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current });
+    expect(result.when).toBe("jj");
+  });
+
+  it("falls back to the unchanged current definition when when is an unknown value", async () => {
+    const currentWithWhen: DraftOutput = { ...current, when: "git" };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ ...currentWithWhen, when: "svn" })));
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current: currentWithWhen });
+    expect(result).toEqual(currentWithWhen);
+  });
+
+  it("clears an existing when when the model response omits the field", async () => {
+    const currentWithWhen: DraftOutput = { ...current, when: "git" };
+    const { when: _omit, ...withoutWhen } = currentWithWhen;
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify(withoutWhen)));
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current: currentWithWhen });
+    expect(result.when).toBeUndefined();
+  });
+
+  it("preserves an existing when only when explicitly re-emitted", async () => {
+    const currentWithWhen: DraftOutput = { ...current, when: "jj" };
+    mockStreamSimple.mockReturnValue(makeStream(JSON.stringify({ ...currentWithWhen, when: "jj" })));
+    const result = await reviseDraftDefinition(fakeModel, { apiKey: "test" }, { current: currentWithWhen });
+    expect(result.when).toBe("jj");
   });
 });

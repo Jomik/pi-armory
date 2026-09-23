@@ -1,8 +1,9 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool } from "./config.js";
 import type { DraftInput } from "./draft.js";
 import { reviseDraftDefinition } from "./draft.js";
+import { detectRepositoryType, toolConditionMatches } from "./repository.js";
 import {
   type ToolFormCallbacks,
   type ToolFormRejection,
@@ -48,6 +49,7 @@ export function makeRedraftCallback(
           guidelines: current.guidelines,
           requires_approval: current.requiresApproval,
           destination: current.destination,
+          ...(current.when ? { when: current.when } : {}),
         },
         instruction,
         originalRequest,
@@ -61,6 +63,7 @@ export function makeRedraftCallback(
       guidelines: revised.guidelines,
       requiresApproval: revised.requires_approval,
       destination: revised.destination,
+      when: revised.when,
     };
   };
 }
@@ -81,7 +84,29 @@ export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTo
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
     ...(opts?.env ? { env: opts.env } : {}),
     ...(opts?.secrets ? { secrets: opts.secrets } : {}),
+    ...(result.when ? { when: result.when } : {}),
   };
+}
+
+/**
+ * Synchronizes `tool`'s active-tool membership for the current session with its `when`
+ * condition at `cwd`: active (added) when the condition matches or is unconditional,
+ * inactive (removed) when it is mismatched. Only ever adds or removes this tool's name;
+ * all other active-tool choices are left untouched.
+ */
+export function syncToolCondition(
+  pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">,
+  cwd: string,
+  tool: ArmoryTool,
+): void {
+  const active = pi.getActiveTools();
+  const matches = !tool.when || toolConditionMatches(tool.when, detectRepositoryType(cwd));
+  const isActive = active.includes(tool.name);
+  if (matches && !isActive) {
+    pi.setActiveTools([...active, tool.name]);
+  } else if (!matches && isActive) {
+    pi.setActiveTools(active.filter((name) => name !== tool.name));
+  }
 }
 
 interface ShowToolEditorContext {

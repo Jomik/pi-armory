@@ -29,6 +29,8 @@ describe("request_tool session destination", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
     };
 
     registerRequestTool(pi as never, "/project");
@@ -73,6 +75,95 @@ describe("request_tool session destination", () => {
     });
   });
 
+  it("passes a drafted when to the form, registers the tool, and syncs its active-state via syncToolCondition", async () => {
+    (sessionRegistry as Map<string, unknown>).clear();
+
+    const mockStreamSimple = vi.mocked(streamSimple);
+    const draftedJson = JSON.stringify({
+      name: "jj_status",
+      command: "jj st",
+      description: "Show jj status",
+      requires_approval: false,
+      guidelines: [],
+      destination: "session",
+      when: "git",
+    });
+    mockStreamSimple.mockReturnValueOnce(
+      (async function* () {
+        yield { type: "text_delta" as const, delta: draftedJson };
+        // biome-ignore lint/suspicious/noExplicitAny: test mock returning async generator
+      })() as any,
+    );
+
+    let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
+    const pi = {
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
+    };
+
+    registerRequestTool(pi as never, "/project");
+
+    let renderedForm = "";
+    const customMock = vi.fn(
+      (
+        render: (
+          tui: unknown,
+          theme: unknown,
+          keybindings: unknown,
+          done: (result: unknown) => void,
+        ) => { render(width: number): string[] },
+      ) =>
+        new Promise((resolve) => {
+          const tui = { requestRender: vi.fn(), terminal: { rows: 24, columns: 100 } };
+          const theme = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+          const panel = render(tui, theme, {}, resolve);
+          renderedForm = panel.render(100).join("\n");
+          resolve({
+            name: "jj_status",
+            command: "jj st",
+            description: "Show jj status",
+            guidelines: [],
+            requiresApproval: false,
+            destination: "session",
+            when: "git",
+          });
+        }),
+    );
+    const ctx = {
+      hasUI: true,
+      mode: "tui",
+      // No real repository cwd; detectRepositoryType resolves to undefined, so a
+      // "git"-conditioned tool mismatches and must not be activated.
+      cwd: undefined,
+      modelRegistry: {
+        getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: "test-key" }),
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: minimal fake model
+      model: { id: "test", name: "test-model" } as any,
+      ui: { custom: customMock },
+    };
+
+    const result = await requestTool?.execute(
+      "tool-call-id",
+      { command: "jj st", reasoning: "Show jj status" },
+      new AbortController().signal,
+      undefined,
+      ctx,
+    );
+
+    // The drafted "git" when reached the form's initial condition state.
+    expect(renderedForm).toMatch(/● Git/);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, expect.objectContaining({ name: "jj_status", when: "git" }));
+    // syncToolCondition is real here (only config.js/register-tool.js are mocked); with no
+    // real repository at ctx.cwd, the "git" condition mismatches, so the tool must not activate.
+    expect(pi.getActiveTools).toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ terminate: true });
+  });
+
   it("does not store project-destination tools in session registry", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
     (sessionRegistry as Map<string, unknown>).set("run_tests", { name: "run_tests" });
@@ -82,6 +173,8 @@ describe("request_tool session destination", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
     };
 
     registerRequestTool(pi as never, "/project");
@@ -181,6 +274,8 @@ describe("request_tool enterprise baseUrl routing", () => {
       registerTool: vi.fn((tool) => {
         requestTool = tool as typeof requestTool;
       }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
     };
 
     registerRequestTool(pi as never, "/project");

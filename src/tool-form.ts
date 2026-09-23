@@ -10,6 +10,7 @@ export interface ToolFormResult {
   guidelines: string[];
   requiresApproval: boolean;
   destination: "project" | "global" | "session";
+  when?: "git" | "jj";
 }
 
 export type ToolFormState = ToolFormResult & {
@@ -33,14 +34,15 @@ export function toolFormPanel(
   initialState: ToolFormState,
   callbacks?: ToolFormCallbacks,
 ): { invalidate(): void; render(width: number): string[]; handleInput(data: string): void } {
-  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=re-draft (if available)
+  let focus = 0; // 0=name, 1=command, 2=description, 3=guidelines, 4=approval, 5=destination, 6=condition, 7=re-draft (if available)
   let requiresApproval = initialState.requiresApproval;
   let destination: "project" | "global" | "session" = initialState.destination;
+  let when: "git" | "jj" | undefined = initialState.when;
   let guidelines: string[] = initialState.guidelines;
   const title = initialState.title ?? "Request Tool";
   let mode: "normal" | "instruction" | "drafting" | "rejecting" = "normal";
   let draftError: string | null = null;
-  const maxFocus = callbacks?.onRedraft ? 6 : 5;
+  const maxFocus = callbacks?.onRedraft ? 7 : 6;
 
   const editorTheme = {
     borderColor: (s: string) => theme.fg("border", s),
@@ -113,6 +115,7 @@ export function toolFormPanel(
       guidelines,
       requiresApproval,
       destination,
+      ...(when ? { when } : {}),
     };
   }
 
@@ -254,7 +257,16 @@ export function toolFormPanel(
         ` ${focus === 5 ? theme.fg("accent", destLabel) : theme.fg("muted", destLabel)} ${theme.fg("text", `${sessMark} Session  ${projMark} Project  ${globMark} Global`)}`,
       );
 
-      // Re-draft button (focus 6)
+      // Condition toggle
+      const condLabel = "Condition:".padEnd(LABEL);
+      const alwaysMark = when === undefined ? "●" : "○";
+      const gitMark = when === "git" ? "●" : "○";
+      const jjMark = when === "jj" ? "●" : "○";
+      lines.push(
+        ` ${focus === 6 ? theme.fg("accent", condLabel) : theme.fg("muted", condLabel)} ${theme.fg("text", `${alwaysMark} Always  ${gitMark} Git  ${jjMark} Jj`)}`,
+      );
+
+      // Re-draft button (focus 7)
       if (callbacks?.onRedraft) {
         lines.push("");
         const redraftLabel = "Re-draft:".padEnd(LABEL);
@@ -271,7 +283,7 @@ export function toolFormPanel(
               lines.push(` ${" ".repeat(LABEL)} ${edLines[j]}`);
             }
           }
-        } else if (focus === 6) {
+        } else if (focus === 7) {
           lines.push(` ${theme.fg("accent", redraftLabel)} ${theme.fg("accent", "● Press Enter to re-draft with AI")}`);
         } else {
           lines.push(` ${theme.fg("muted", redraftLabel)} ${theme.fg("dim", "Press Enter to re-draft with AI")}`);
@@ -305,7 +317,7 @@ export function toolFormPanel(
           hint = "Enter next field  •  Esc reject  •  Tab next field";
         } else if (focus === 3) {
           hint = "Enter save/add  •  ↑↓ edit prior  •  Delete remove selected  •  Esc reject  •  Tab next field";
-        } else if (focus === 6) {
+        } else if (focus === 7) {
           hint = "Enter re-draft  •  Esc reject  •  Tab next field";
         } else {
           hint = "Enter approve  •  Esc reject  •  ←→/Space toggle";
@@ -348,6 +360,7 @@ export function toolFormPanel(
                 }
                 if (result.requiresApproval !== undefined) requiresApproval = result.requiresApproval;
                 if (result.destination !== undefined) destination = result.destination;
+                if ("when" in result) when = result.when;
               } else {
                 draftError = "Re-draft unavailable";
               }
@@ -450,13 +463,13 @@ export function toolFormPanel(
             focus = 4;
             tui.requestRender();
           }
-        } else if (focus === 6 && callbacks?.onRedraft) {
+        } else if (focus === 7 && callbacks?.onRedraft) {
           // Enter re-draft instruction mode
           draftError = null;
           mode = "instruction";
           tui.requestRender();
         } else {
-          // focus 4 or 5 — approve
+          // focus 4, 5, or 6 — approve
           done(currentResult());
         }
         return;
@@ -496,6 +509,18 @@ export function toolFormPanel(
           tui.requestRender();
         } else if (matchesKey(data, Key.left)) {
           destination = destination === "session" ? "global" : destination === "project" ? "session" : "project";
+          tui.requestRender();
+        }
+        return;
+      }
+
+      // Condition toggle
+      if (focus === 6) {
+        if (matchesKey(data, Key.space) || matchesKey(data, Key.right)) {
+          when = when === undefined ? "git" : when === "git" ? "jj" : undefined;
+          tui.requestRender();
+        } else if (matchesKey(data, Key.left)) {
+          when = when === undefined ? "jj" : when === "jj" ? "git" : undefined;
           tui.requestRender();
         }
         return;

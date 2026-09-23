@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ArmoryTool } from "../src/config.js";
 import type { CandidateRequest } from "../src/draft.js";
 
 // ---------------------------------------------------------------------------
@@ -43,13 +44,14 @@ vi.mock("../src/shared.js", () => ({
     command: r.command,
     description: r.description,
   })),
+  syncToolCondition: vi.fn(),
 }));
 
 import { saveConfig } from "../src/config.js";
 import { draftToolDefinition as mockDraft, generateCandidateRequests as mockGenerateCandidates } from "../src/draft.js";
 import { handleOnboard } from "../src/onboard.js";
 import { registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
-import { buildToolFromResult, resolveModel, showToolEditor } from "../src/shared.js";
+import { buildToolFromResult, resolveModel, showToolEditor, syncToolCondition } from "../src/shared.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: test mock
 const fakeResolvedModel = {} as any;
@@ -102,6 +104,7 @@ function makeCtx(
 
   const ctx = {
     mode,
+    cwd: "/project",
     modelRegistry: {
       getApiKeyAndHeaders: vi.fn().mockResolvedValue(authOk ? { ok: true, apiKey: "test-key" } : { ok: false }),
     },
@@ -465,5 +468,35 @@ describe("handleOnboard — per-candidate flow", () => {
     const notifyCalls = vi.mocked(ctx.ui.notify).mock.calls;
     const summary = notifyCalls[notifyCalls.length - 1];
     expect(summary?.[0]).toContain("1 tool registered");
+  });
+
+  it("passes drafted when to the editor, registers the tool, and syncs the tool's active-state via syncToolCondition", async () => {
+    const draftWithWhen = { ...sampleDraft, when: "git" as const };
+    const editorResultWithWhen = { ...sampleEditorResult, when: "git" as const };
+    const builtTool: ArmoryTool = {
+      name: "run_tests",
+      command: "npm test",
+      description: "Run the test suite",
+      when: "git",
+    };
+    vi.mocked(mockDraft).mockResolvedValue(draftWithWhen);
+    vi.mocked(showToolEditor).mockResolvedValue(editorResultWithWhen);
+    vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
+
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+
+    expect(showToolEditor).toHaveBeenCalledWith(
+      ctx,
+      expect.objectContaining({ when: "git" }),
+      "provider:model",
+      expect.anything(),
+    );
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool);
+    // syncToolCondition is mocked here — assert it is invoked with the built tool rather
+    // than asserting real pi active-state changes, which only the unmocked helper performs.
+    expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, builtTool);
   });
 });

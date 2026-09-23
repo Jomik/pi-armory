@@ -41,6 +41,20 @@ The query only describes project-configured tool names. It does not grant tools,
 - Automatically granting project tools to other sessions or agents.
 - Host-specific blocked-state events or UI integrations. Armory relies on Pi's standard blocking-prompt lifecycle; hosts such as Orca and Herdr are responsible for consuming it.
 
+## Repository-conditional tools
+
+A tool may declare an optional built-in `when` condition. Initially, the only valid values are `git` and `jj`:
+
+- No `when` condition means the tool is available in every workspace.
+- `when: "jj"` makes the tool available only when the session workspace is a Jujutsu repository.
+- `when: "git"` makes the tool available only when the session workspace is a Git repository that is not also a Jujutsu repository; Jujutsu takes precedence in colocated repositories.
+
+Conditions are evaluated for the session workspace when a session starts, and re-applied immediately whenever a tool is created, edited, onboarded, or revealed (e.g. by deleting a shadowing tool), so its active state always matches the current workspace without waiting for the next session. A failed repository probe is treated as a non-match, not an extension failure. Unknown condition values make the configuration invalid.
+
+The tool review form (used by `request_tool`, `/armory edit`, and onboarding) exposes the condition as an Always/Git/Jj toggle. When drafting, the draft model may infer `git` or `jj` only for commands that are genuinely specific to that backend (e.g. plumbing commands); it omits the field for tools that work equally well in both.
+
+The condition set is intentionally closed. Arbitrary shell predicates, named condition groups, boolean expressions, and speculative operating-system or environment conditions are non-goals.
+
 ## Core Design
 
 - Tools are shell commands with optional `{{param}}` template parameters
