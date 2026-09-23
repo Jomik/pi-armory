@@ -437,7 +437,11 @@ describe("handleOnboard — per-candidate flow", () => {
       true,
     );
     expect(registerArmoryTool).not.toHaveBeenCalled();
-    expect(sessionRegistry.get("other_tool")).toEqual({ name: "other_tool", command: "echo old", description: "Old tool" });
+    expect(sessionRegistry.get("other_tool")).toEqual({
+      name: "other_tool",
+      command: "echo old",
+      description: "Old tool",
+    });
     expect(syncToolCondition).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Skipped 'Run tests': save failed", "info");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Onboarding complete: 0 registered, 1 skipped.", "info");

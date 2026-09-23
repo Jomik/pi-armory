@@ -331,7 +331,11 @@ describe("request_tool session destination", () => {
       true,
     );
     expect(registerArmoryTool).not.toHaveBeenCalled();
-    expect(sessionRegistry.get("other_tool")).toEqual({ name: "other_tool", command: "echo old", description: "Old tool" });
+    expect(sessionRegistry.get("other_tool")).toEqual({
+      name: "other_tool",
+      command: "echo old",
+      description: "Old tool",
+    });
     expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 
@@ -431,52 +435,52 @@ describe("request_tool session destination", () => {
     expect(sessionRegistry.get("run_tests")).toMatchObject({ envFrom: [] });
   });
 
-  it.each(["session", "project"] as const)(
-    "refuses a normalized session name collision for %s creation",
-    async (destination) => {
-      (sessionRegistry as Map<string, unknown>).clear();
-      const existing = { name: "run_tests", command: "echo existing" };
-      sessionRegistry.set("run_tests", existing);
-      let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-      const pi = {
-        registerTool: vi.fn((tool) => {
-          requestTool = tool as typeof requestTool;
+  it.each([
+    "session",
+    "project",
+  ] as const)("refuses a normalized session name collision for %s creation", async (destination) => {
+    (sessionRegistry as Map<string, unknown>).clear();
+    const existing = { name: "run_tests", command: "echo existing" };
+    sessionRegistry.set("run_tests", existing);
+    let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
+    const pi = {
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
+    };
+    registerRequestTool(pi as never, "/project");
+    const ctx = {
+      hasUI: true,
+      mode: "tui",
+      modelRegistry: {},
+      model: undefined,
+      ui: {
+        custom: vi.fn().mockResolvedValue({
+          name: "Run Tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination,
         }),
-        getActiveTools: vi.fn(() => [] as string[]),
-        setActiveTools: vi.fn(),
-      };
-      registerRequestTool(pi as never, "/project");
-      const ctx = {
-        hasUI: true,
-        mode: "tui",
-        modelRegistry: {},
-        model: undefined,
-        ui: {
-          custom: vi.fn().mockResolvedValue({
-            name: "Run Tests",
-            command: "npm test",
-            description: "Run tests",
-            guidelines: [],
-            requiresApproval: false,
-            destination,
-          }),
-        },
-      };
-      await expect(
-        requestTool?.execute(
-          "id",
-          { command: "npm test", reasoning: "Run tests" },
-          new AbortController().signal,
-          undefined,
-          ctx,
-        ),
-      ).rejects.toThrow(/name.*already used/);
-      expect(saveConfig).not.toHaveBeenCalled();
-      expect(registerArmoryTool).not.toHaveBeenCalled();
-      expect(sessionRegistry.get("run_tests")).toBe(existing);
-      expect(pi.setActiveTools).not.toHaveBeenCalled();
-    },
-  );
+      },
+    };
+    await expect(
+      requestTool?.execute(
+        "id",
+        { command: "npm test", reasoning: "Run tests" },
+        new AbortController().signal,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow(/name.*already used/);
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("run_tests")).toBe(existing);
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+  });
 
   it("rejects a same-destination persisted collision at save without registering", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
