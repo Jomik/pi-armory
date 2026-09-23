@@ -3,6 +3,7 @@ import type { ArmoryTool } from "../src/config.js";
 
 vi.mock("../src/config.js", () => ({
   getDestinationEnvSets: vi.fn(),
+  loadToolInDestination: vi.fn(),
   loadToolsWithSource: vi.fn(),
   loadToolWithSource: vi.fn(),
   removeFromConfig: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock("../src/onboard.js", () => ({
 import { type ArmoryCommandDeps, registerArmoryCommand } from "../src/commands.js";
 import {
   getDestinationEnvSets,
+  loadToolInDestination,
   loadToolsWithSource,
   loadToolWithSource,
   removeFromConfig,
@@ -105,9 +107,13 @@ describe("handleEdit", () => {
     toolRegistry.clear();
     vi.mocked(loadToolsWithSource).mockReset();
     vi.mocked(loadToolWithSource).mockReset();
+    vi.mocked(loadToolInDestination).mockReset();
+    vi.mocked(loadToolInDestination).mockResolvedValue(null);
     vi.mocked(getDestinationEnvSets).mockReset();
     vi.mocked(getDestinationEnvSets).mockResolvedValue({});
+    vi.mocked(saveConfig).mockReset();
     vi.mocked(saveConfig).mockResolvedValue({});
+    vi.mocked(removeFromConfig).mockReset();
     vi.mocked(removeFromConfig).mockResolvedValue(undefined);
     vi.mocked(registerArmoryTool).mockClear();
   });
@@ -376,8 +382,117 @@ describe("handleEdit", () => {
 
     const [confirmMsg] = (ctx.ui.select as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(confirmMsg).toContain("available in all projects");
+    expect(loadToolInDestination).toHaveBeenCalledWith("run_tests", "global", "/project");
     expect(saveConfig).toHaveBeenCalledWith(toolProject, "global", "/project", undefined, {});
     expect(removeFromConfig).toHaveBeenCalledWith("run_tests", "project", "/project");
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, toolProject, {});
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
+  });
+
+  it("does not write when the destination snapshot cannot be loaded", async () => {
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+    vi.mocked(loadToolInDestination).mockRejectedValue(new Error("secret destination detail"));
+    vi.mocked(showToolEditor).mockResolvedValue({ ...toolProject, destination: "global" });
+    const pi = makePi();
+    const deps = makeDeps();
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
+    registerArmoryCommand(pi as never, deps);
+    await getHandler(pi)("edit run_tests", ctx as never);
+
+    expect(saveConfig).not.toHaveBeenCalled();
+    expect(removeFromConfig).not.toHaveBeenCalled();
+    expect(deps.tools).toEqual([toolProject]);
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Review the config and retry"), "error");
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toContain("secret destination detail");
+  });
+
+  it("rolls back a newly created destination when source removal fails, without changing runtime state", async () => {
+    const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
+    const movedTool: ArmoryTool = { ...oldTool, command: "npm test --watch" };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: oldTool, source: "project" });
+    vi.mocked(showToolEditor).mockResolvedValue({ ...movedTool, destination: "global" });
+    vi.mocked(buildToolFromResult).mockReturnValue(movedTool);
+    vi.mocked(removeFromConfig).mockRejectedValueOnce(new Error("secret source detail"));
+    approvalRegistry.set(oldTool.name, oldTool);
+    toolRegistry.set(oldTool.name, oldTool);
+    const pi = makePi();
+    const deps = makeDeps({ tools: [oldTool] });
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
+    registerArmoryCommand(pi as never, deps);
+    await getHandler(pi)("edit run_tests", ctx as never);
+
+    expect(loadToolInDestination).toHaveBeenCalledWith("run_tests", "global", "/project");
+    expect(saveConfig).toHaveBeenCalledTimes(1);
+    expect(saveConfig).toHaveBeenCalledWith(movedTool, "global", "/project", undefined, {});
+    expect(vi.mocked(removeFromConfig).mock.calls).toEqual([
+      ["run_tests", "project", "/project"],
+      ["run_tests", "global", "/project"],
+    ]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Review the config and retry"), "error");
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toContain("secret source detail");
+    expect(deps.tools).toEqual([oldTool]);
+    expect(approvalRegistry.get(oldTool.name)).toBe(oldTool);
+    expect(toolRegistry.get(oldTool.name)).toBe(oldTool);
+    expect(sessionRegistry.size).toBe(0);
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(syncToolCondition).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+  });
+
+  it("restores the exact overwritten destination tool when source removal fails", async () => {
+    const oldTool: ArmoryTool = { ...toolProject, requires_approval: true };
+    const priorDestination: ArmoryTool = {
+      ...toolProject,
+      command: "echo prior",
+      description: "prior",
+      envFrom: ["global_set"],
+    };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: oldTool, source: "project" });
+    vi.mocked(loadToolInDestination).mockResolvedValue(priorDestination);
+    vi.mocked(showToolEditor).mockResolvedValue({ ...oldTool, destination: "global" });
+    vi.mocked(buildToolFromResult).mockReturnValue(oldTool);
+    vi.mocked(removeFromConfig).mockRejectedValueOnce(new Error("source write error"));
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Confirm"] });
+    registerArmoryCommand(pi as never, makeDeps({ tools: [oldTool] }));
+    await getHandler(pi)("edit run_tests", ctx as never);
+
+    expect(loadToolInDestination).toHaveBeenCalledWith("run_tests", "global", "/project");
+    expect(vi.mocked(saveConfig).mock.calls).toEqual([
+      [oldTool, "global", "/project", undefined, {}],
+      [priorDestination, "global", "/project"],
+    ]);
+    expect(removeFromConfig).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Review the config and retry"), "error");
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+  });
+
+  it("reports partial changes when rollback of a same-config rename also fails", async () => {
+    const renamed: ArmoryTool = { ...toolProject, name: "renamed_tool" };
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+    vi.mocked(showToolEditor).mockResolvedValue({ ...renamed, destination: "project" });
+    vi.mocked(buildToolFromResult).mockReturnValue(renamed);
+    vi.mocked(removeFromConfig)
+      .mockRejectedValueOnce(new Error("secret source detail"))
+      .mockRejectedValueOnce(new Error("secret rollback detail"));
+    const pi = makePi();
+    const deps = makeDeps();
+    const ctx = makeCtx();
+    registerArmoryCommand(pi as never, deps);
+    await getHandler(pi)("edit run_tests", ctx as never);
+
+    expect(loadToolInDestination).toHaveBeenCalledWith("renamed_tool", "project", "/project");
+    expect(saveConfig).toHaveBeenCalledWith(renamed, "project", "/project", undefined, {});
+    expect(vi.mocked(removeFromConfig).mock.calls).toEqual([
+      ["run_tests", "project", "/project"],
+      ["renamed_tool", "project", "/project"],
+    ]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("configs may be partially changed"), "error");
+    expect(ctx.ui.notify.mock.calls.flat().join(" ")).not.toMatch(/secret|updated/);
+    expect(deps.tools).toEqual([toolProject]);
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
   });
 
   it("moving global → project requires confirmation, saves project, and removes global", async () => {

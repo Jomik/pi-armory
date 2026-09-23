@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type { ArmoryTool, ToolSource } from "./config.js";
 import {
   getDestinationEnvSets,
+  loadToolInDestination,
   loadToolsWithSource,
   loadToolWithSource,
   removeFromConfig,
@@ -333,16 +334,38 @@ async function handleEdit(
     // Remove from persisted tool list
     const idx = deps.tools.findIndex((t) => t.name === sourceName);
     if (idx !== -1) deps.tools.splice(idx, 1);
-  } else {
+  } else if (source !== "session" && result.destination !== "session") {
     // Project/global → project/global: persist (may move between locations)
+    const needsRemoval = result.destination !== source || destName !== sourceName;
+    let priorDestinationTool: ArmoryTool | null = null;
     try {
+      if (needsRemoval) {
+        priorDestinationTool = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+      }
       savedEnvSets = await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
     } catch {
       ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
       return;
     }
-    if (result.destination !== source || destName !== sourceName) {
-      await removeFromConfig(sourceName, source as "project" | "global", deps.projectRoot);
+    if (needsRemoval) {
+      try {
+        await removeFromConfig(sourceName, source, deps.projectRoot);
+      } catch {
+        try {
+          if (priorDestinationTool) {
+            await saveConfig(priorDestinationTool, result.destination, deps.projectRoot);
+          } else {
+            await removeFromConfig(destName, result.destination, deps.projectRoot);
+          }
+          ctx.ui.notify("Could not remove tool from source config. Review the config and retry.", "error");
+        } catch {
+          ctx.ui.notify(
+            "Could not remove tool from source config; configs may be partially changed. Reconcile them manually before retrying.",
+            "error",
+          );
+        }
+        return;
+      }
     }
     // Update persisted tool list
     const idx = deps.tools.findIndex((t) => t.name === sourceName);
