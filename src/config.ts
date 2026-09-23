@@ -210,10 +210,14 @@ export async function removeFromConfig(
   destination: "project" | "global",
   projectRoot: string,
   agentDir: string = getAgentDir(),
+  expectedTool?: ArmoryTool,
 ): Promise<void> {
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
   if (!config) throw new Error(`Invalid config in ${filePath}; refusing to modify it`);
+  if (expectedTool !== undefined && !isDeepStrictEqual(config.tools.find((t) => t.name === toolName), expectedTool)) {
+    throw new Error(`Tool ${toolName} changed; reload before removing`);
+  }
   const tools = config.tools.filter((t) => t.name !== toolName);
   if (tools.length === config.tools.length) return; // nothing to remove
   await writeConfigFile(filePath, { ...config, tools });
@@ -225,6 +229,7 @@ export async function saveConfig(
   projectRoot: string,
   agentDir: string = getAgentDir(),
   expectedEnvSets?: EnvSets,
+  createOnly = false,
 ): Promise<EnvSets> {
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
@@ -244,6 +249,7 @@ export async function saveConfig(
   const tools = [...config.tools];
   const idx = tools.findIndex((t) => t.name === tool.name);
   if (idx >= 0) {
+    if (createOnly) throw new Error(`Tool ${tool.name} already exists; reload before saving`);
     tools[idx] = tool;
   } else {
     tools.push(tool);

@@ -259,6 +259,25 @@ describe("shared environment sets", () => {
 });
 
 describe("saveConfig", () => {
+  it("rejects a create-only collision without changing the destination bytes", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools: [toolA, toolB], draftModel: "fast-model" });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(saveConfig(toolAOverride, "project", projectRoot, fakeAgentDir, undefined, true)).rejects.toThrow(
+      "tool-a",
+    );
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("creates an absent tool in create-only mode", async () => {
+    await writeProject([toolB]);
+    await saveConfig(toolA, "project", projectRoot, fakeAgentDir, undefined, true);
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    expect(JSON.parse(content)).toEqual({ tools: [toolB, toolA] });
+  });
+
   it("allows unchanged selected sets despite key order or unrelated set changes and returns the destination sets", async () => {
     const filePath = path.join(projectRoot, ".pi", "armory.json");
     const expected = {
@@ -441,6 +460,33 @@ describe("loadToolInDestination", () => {
 });
 
 describe("removeFromConfig", () => {
+  it.each([
+    ["changed", [toolAOverride, toolB]],
+    ["missing", [toolB]],
+  ])("rejects a %s guarded tool without changing the destination bytes", async (_case, tools) => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools, draftModel: "fast-model" });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, toolA)).rejects.toThrow("tool-a");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("rejects a guarded removal when the destination file is missing", async () => {
+    await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, toolA)).rejects.toThrow("tool-a");
+    await expect(readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("removes a matching guarded tool while preserving other tools", async () => {
+    await writeProject([toolA, toolB]);
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, { ...toolA });
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    expect(JSON.parse(content)).toEqual({ tools: [toolB] });
+  });
+
   it("does nothing if the config file does not exist (ENOENT)", async () => {
     // Neither project nor global file exists — should not throw
     await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir)).resolves.toBeUndefined();
