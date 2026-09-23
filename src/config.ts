@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import type { ArmoryConfig, ArmoryTool, EnvBinding } from "./schema.js";
@@ -211,10 +212,23 @@ export async function saveConfig(
   destination: "project" | "global",
   projectRoot: string,
   agentDir: string = getAgentDir(),
-): Promise<void> {
+  expectedEnvSets?: EnvSets,
+): Promise<EnvSets> {
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
   if (!config) throw new Error(`Invalid config in ${filePath}; refusing to modify it`);
+  const envSets = config.envSets ?? {};
+  if (expectedEnvSets !== undefined) {
+    for (const name of tool.envFrom ?? []) {
+      if (
+        !Object.hasOwn(expectedEnvSets, name) ||
+        !Object.hasOwn(envSets, name) ||
+        !isDeepStrictEqual(expectedEnvSets[name], envSets[name])
+      ) {
+        throw new Error("Selected env set changed; reload before saving");
+      }
+    }
+  }
   const tools = [...config.tools];
   const idx = tools.findIndex((t) => t.name === tool.name);
   if (idx >= 0) {
@@ -225,4 +239,5 @@ export async function saveConfig(
   const updated = { ...config, tools };
   validateConfig(updated);
   await writeConfigFile(filePath, updated);
+  return envSets;
 }

@@ -258,6 +258,58 @@ describe("shared environment sets", () => {
 });
 
 describe("saveConfig", () => {
+  it("allows unchanged selected sets despite key order or unrelated set changes and returns the destination sets", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const expected = {
+      selected: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" },
+      unrelated: { OLD: "old" },
+    };
+    const destinationSets = {
+      unrelated: { NEW: "new" },
+      selected: { HOST: "public", TOKEN: { secret: true, env: "TOKEN_SOURCE" } },
+    };
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, JSON.stringify({ tools: [], envSets: destinationSets }));
+
+    const result = await saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, expected);
+
+    expect(result).toEqual(destinationSets);
+    expect(JSON.parse(await readFile(filePath, "utf-8"))).toEqual({
+      tools: [{ ...toolA, envFrom: ["selected"] }],
+      envSets: destinationSets,
+    });
+  });
+
+  it.each([
+    ["secret flag", { selected: { TOKEN: { env: "TOKEN_SOURCE", secret: false }, HOST: "public" } }],
+    ["resolver", { selected: { TOKEN: { command: "get-token", secret: true }, HOST: "public" } }],
+    ["variable names", { selected: { RENAMED: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } }],
+    ["missing name", { other: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } }],
+  ])("rejects a changed selected set (%s) without writing", async (_case, destinationSets) => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const expected = { selected: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } };
+    const original = JSON.stringify({ tools: [toolB], envSets: destinationSets }, null, 2) + "\n";
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(
+      saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, expected),
+    ).rejects.toThrow("Selected env set changed; reload before saving");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("rejects when the expected snapshot lacks a selected name", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools: [], envSets: { selected: { KEY: "value" } } });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(
+      saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, {}),
+    ).rejects.toThrow("Selected env set changed; reload before saving");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
   it("creates project file if it does not exist", async () => {
     await saveConfig(toolA, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
