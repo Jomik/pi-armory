@@ -419,7 +419,10 @@ describe("loadToolInDestination", () => {
     expect(await loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).toBeNull();
   });
 
-  it.each(["project", "global"] as const)("throws for invalid %s config instead of falling back", async (destination) => {
+  it.each([
+    "project",
+    "global",
+  ] as const)("throws for invalid %s config instead of falling back", async (destination) => {
     if (destination === "project") {
       await writeGlobal([toolA]);
     } else {
