@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ArmoryConfigSchema } from "../src/schema.js";
 import type { ArmoryTool } from "../src/config.js";
 import {
   getDestinationEnvSets,
@@ -13,6 +12,7 @@ import {
   saveConfig,
   validateEffectiveBindings,
 } from "../src/config.js";
+import { ArmoryConfigSchema } from "../src/schema.js";
 
 let tmpDir: string;
 let fakeHome: string;
