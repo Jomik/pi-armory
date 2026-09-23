@@ -267,6 +267,14 @@ async function handleEdit(
     return;
   }
 
+  if (name !== tool.name && sessionRegistry.has(name)) {
+    ctx.ui.notify(
+      `Tool '${name}' already exists in this session. Rename it or remove the existing tool and retry.`,
+      "error",
+    );
+    return;
+  }
+
   // Confirm if scope/destination is being changed
   if (result.destination !== source) {
     const msg = scopeChangeMessage(tool.name, source, result.destination);
