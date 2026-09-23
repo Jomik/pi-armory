@@ -215,7 +215,13 @@ export async function removeFromConfig(
   const filePath = resolveConfigPath(destination, projectRoot, agentDir);
   const config = await readConfigFile(filePath);
   if (!config) throw new Error(`Invalid config in ${filePath}; refusing to modify it`);
-  if (expectedTool !== undefined && !isDeepStrictEqual(config.tools.find((t) => t.name === toolName), expectedTool)) {
+  if (
+    expectedTool !== undefined &&
+    !isDeepStrictEqual(
+      config.tools.find((t) => t.name === toolName),
+      expectedTool,
+    )
+  ) {
     throw new Error(`Tool ${toolName} changed; reload before removing`);
   }
   const tools = config.tools.filter((t) => t.name !== toolName);
