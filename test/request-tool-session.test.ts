@@ -214,7 +214,11 @@ describe("request_tool session destination", () => {
     );
 
     expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "run_tests" }), "project", "/project", undefined, envSets,
+      expect.objectContaining({ name: "run_tests" }),
+      "project",
+      "/project",
+      undefined,
+      envSets,
     );
     expect(getDestinationEnvSets).toHaveBeenCalledTimes(2);
     expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
@@ -223,7 +227,10 @@ describe("request_tool session destination", () => {
     expect(sessionRegistry.has("run_tests")).toBe(false);
   });
 
-  it.each(["project", "global"] as const)("saves selected %s sets and registers using the save snapshot", async (destination) => {
+  it.each([
+    "project",
+    "global",
+  ] as const)("saves selected %s sets and registers using the save snapshot", async (destination) => {
     (sessionRegistry as Map<string, unknown>).clear();
     const displayed = { common: { TOKEN: { env: "TOKEN" } } };
     const saved = { common: { TOKEN: { env: "TOKEN" } }, later: { X: "value" } };
@@ -231,19 +238,38 @@ describe("request_tool session destination", () => {
     vi.mocked(saveConfig).mockResolvedValue(saved);
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
     const pi = {
-      registerTool: vi.fn((tool) => { requestTool = tool as typeof requestTool; }),
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
       getActiveTools: vi.fn(() => [] as string[]),
       setActiveTools: vi.fn(),
     };
     registerRequestTool(pi as never, "/project");
     const ctx = {
-      hasUI: true, mode: "tui", cwd: "/project", modelRegistry: {}, model: undefined,
-      ui: { custom: vi.fn().mockResolvedValue({
-        name: "run_tests", command: "npm test", description: "Run tests", guidelines: [],
-        requiresApproval: false, destination, envFrom: ["common"],
-      }) },
+      hasUI: true,
+      mode: "tui",
+      cwd: "/project",
+      modelRegistry: {},
+      model: undefined,
+      ui: {
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination,
+          envFrom: ["common"],
+        }),
+      },
     };
-    await requestTool?.execute("id", { command: "npm test", reasoning: "Run tests" }, new AbortController().signal, undefined, ctx);
+    await requestTool?.execute(
+      "id",
+      { command: "npm test", reasoning: "Run tests" },
+      new AbortController().signal,
+      undefined,
+      ctx,
+    );
     expect(getDestinationEnvSets).toHaveBeenCalledTimes(2);
     expect(ctx.ui.custom).toHaveBeenCalled();
     const tool = expect.objectContaining({ name: "run_tests", envFrom: ["common"] });
@@ -262,19 +288,47 @@ describe("request_tool session destination", () => {
     vi.mocked(saveConfig).mockRejectedValue(new Error("Selected env set changed; reload before saving"));
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
     const pi = {
-      registerTool: vi.fn((tool) => { requestTool = tool as typeof requestTool; }),
-      getActiveTools: vi.fn(() => [] as string[]), setActiveTools: vi.fn(),
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
     };
     registerRequestTool(pi as never, "/project");
     const ctx = {
-      hasUI: true, mode: "tui", cwd: "/project", modelRegistry: {}, model: undefined,
-      ui: { custom: vi.fn().mockResolvedValue({ name: "run_tests", command: "npm test", description: "Run tests",
-        guidelines: [], requiresApproval: false, destination: "project", envFrom: ["common"] }) },
+      hasUI: true,
+      mode: "tui",
+      cwd: "/project",
+      modelRegistry: {},
+      model: undefined,
+      ui: {
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "project",
+          envFrom: ["common"],
+        }),
+      },
     };
-    await expect(requestTool?.execute("id", { command: "npm test", reasoning: "Run tests" },
-      new AbortController().signal, undefined, ctx)).rejects.toThrow("Selected env set changed");
-    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ envFrom: ["common"] }),
-      "project", "/project", undefined, { common: { TOKEN: "value" } });
+    await expect(
+      requestTool?.execute(
+        "id",
+        { command: "npm test", reasoning: "Run tests" },
+        new AbortController().signal,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Selected env set changed");
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ envFrom: ["common"] }),
+      "project",
+      "/project",
+      undefined,
+      { common: { TOKEN: "value" } },
+    );
     expect(registerArmoryTool).not.toHaveBeenCalled();
     expect(sessionRegistry.get("run_tests")).toEqual({ name: "old" });
     expect(pi.setActiveTools).not.toHaveBeenCalled();
@@ -289,19 +343,47 @@ describe("request_tool session destination", () => {
     vi.mocked(saveConfig).mockRejectedValue(new Error("Selected env set changed; reload before saving"));
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
     const pi = {
-      registerTool: vi.fn((tool) => { requestTool = tool as typeof requestTool; }),
-      getActiveTools: vi.fn(() => [] as string[]), setActiveTools: vi.fn(),
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
     };
     registerRequestTool(pi as never, "/project");
     const ctx = {
-      hasUI: true, mode: "tui", cwd: "/project", modelRegistry: {}, model: undefined,
-      ui: { custom: vi.fn().mockResolvedValue({ name: "run_tests", command: "npm test", description: "Run tests",
-        guidelines: [], requiresApproval: false, destination: "global", envFrom: ["common"] }) },
+      hasUI: true,
+      mode: "tui",
+      cwd: "/project",
+      modelRegistry: {},
+      model: undefined,
+      ui: {
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "global",
+          envFrom: ["common"],
+        }),
+      },
     };
-    await expect(requestTool?.execute("id", { command: "npm test", reasoning: "Run tests" },
-      new AbortController().signal, undefined, ctx)).rejects.toThrow("Selected env set changed");
-    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ envFrom: ["common"] }),
-      "global", "/project", undefined, {});
+    await expect(
+      requestTool?.execute(
+        "id",
+        { command: "npm test", reasoning: "Run tests" },
+        new AbortController().signal,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Selected env set changed");
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ envFrom: ["common"] }),
+      "global",
+      "/project",
+      undefined,
+      {},
+    );
     expect(registerArmoryTool).not.toHaveBeenCalled();
   });
 
@@ -309,14 +391,39 @@ describe("request_tool session destination", () => {
     (sessionRegistry as Map<string, unknown>).clear();
     vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("unreadable"));
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
-    const pi = { registerTool: vi.fn((tool) => { requestTool = tool as typeof requestTool; }),
-      getActiveTools: vi.fn(() => [] as string[]), setActiveTools: vi.fn() };
+    const pi = {
+      registerTool: vi.fn((tool) => {
+        requestTool = tool as typeof requestTool;
+      }),
+      getActiveTools: vi.fn(() => [] as string[]),
+      setActiveTools: vi.fn(),
+    };
     registerRequestTool(pi as never, "/project");
-    const ctx = { hasUI: true, mode: "tui", cwd: "/project", modelRegistry: {}, model: undefined,
-      ui: { custom: vi.fn().mockResolvedValue({ name: "run_tests", command: "npm test", description: "Run tests",
-        guidelines: [], requiresApproval: false, destination: "session", envFrom: ["common"] }) } };
-    await requestTool?.execute("id", { command: "npm test", reasoning: "Run tests" },
-      new AbortController().signal, undefined, ctx);
+    const ctx = {
+      hasUI: true,
+      mode: "tui",
+      cwd: "/project",
+      modelRegistry: {},
+      model: undefined,
+      ui: {
+        custom: vi.fn().mockResolvedValue({
+          name: "run_tests",
+          command: "npm test",
+          description: "Run tests",
+          guidelines: [],
+          requiresApproval: false,
+          destination: "session",
+          envFrom: ["common"],
+        }),
+      },
+    };
+    await requestTool?.execute(
+      "id",
+      { command: "npm test", reasoning: "Run tests" },
+      new AbortController().signal,
+      undefined,
+      ctx,
+    );
     expect(saveConfig).not.toHaveBeenCalled();
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, expect.objectContaining({ envFrom: [] }));
     expect(sessionRegistry.get("run_tests")).toMatchObject({ envFrom: [] });

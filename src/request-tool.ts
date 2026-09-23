@@ -158,7 +158,13 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
       if (result.destination === "session") {
         registerArmoryTool(pi, tool);
       } else {
-        const savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+        const savedSets = await saveConfig(
+          tool,
+          result.destination,
+          projectRoot,
+          undefined,
+          envSets[result.destination],
+        );
         sessionRegistry.delete(tool.name);
         registerArmoryTool(pi, tool, savedSets);
       }
