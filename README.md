@@ -69,6 +69,8 @@ Parameters are declared via template syntax in the command string:
 - `{{name?}}` - optional string (omitted when not provided)
 - `{{...name}}` - required variadic (expands to multiple shell-escaped args)
 - `{{...name?}}` - optional variadic
+- `{{--verbose}}` / `{{-v}}` - required boolean flag; `{{--verbose?}}` / `{{-v?}}` - optional boolean flag. `true` emits the flag, `false` omits it; an omitted optional value also emits nothing.
+- `{{--message text}}` / `{{-m text}}` - required value flag; `{{--message text?}}` / `{{-m text?}}` - optional value flag. A provided value expands to the flag, a space, and the shell-escaped value (e.g. `--message 'hello world'`); an omitted optional value emits nothing.
 
 ```json
 {
@@ -171,7 +173,7 @@ Selected set and inline bindings resolve once per invocation, before the main co
 
 If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Generic failure suppression for `secret: true` bindings applies specifically to a failing `{ command }` resolver: the error is reported without leaking resolver output or diagnostics. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Failures on non-secret bindings keep their full diagnostic detail.
 
-Legacy `secrets` fields make a config file invalid; old `$VAR` and `$$` strings are now literal values, not substitution syntax. Migrate existing global config manually to `env`/`envSets` bindings; there is no automatic migration. An invalid config file is ignored in full with a warning, and saves refuse to overwrite it.
+Legacy `secrets` fields make a config file invalid; old `$VAR` and `$$` strings are now literal values, not substitution syntax. Migrate existing project and global configs manually to `env`/`envSets` bindings; there is no automatic migration. An invalid config file is ignored in full with a warning, and saves refuse to overwrite it.
 
 > **No built-in secret store.** Armory has no secrets store and no `/armory secrets` UI. Use a `command` binding that calls your credential's own provider or CLI — e.g. `gh auth token` for the GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored yourself in the macOS Keychain. You manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
@@ -218,7 +220,7 @@ Renaming a tool during edit uses the same normalization, validation, and reserve
 
 Cancelling the confirmation aborts the edit — no config or registry is modified.
 
-Editing preserves existing `envFrom` selections unless you clear or change them explicitly in the form. Moving a set-backed tool to another scope requires selecting compatible sets there; moving it to Session clears `envFrom`. A move is refused if its selections cannot be resolved in the destination. Creating or moving a tool rejects same-scope or session-name collisions rather than silently overwriting another tool. The form selects existing sets only; it does not edit set definitions or group tools.
+Editing preserves existing `envFrom` selections unless you clear or change them explicitly in the form. Moving a set-backed tool to another scope requires selecting compatible sets there; to move it to Session, explicitly deselect all sets in the form. The form blocks approval until selections are resolved, and saving refuses unresolved or stale sets. Creating or moving a tool rejects same-scope or session-name collisions rather than silently overwriting another tool. The form selects existing sets only; it does not edit set definitions or group tools.
 
 When editing, AI re-draft can be invoked from the Re-draft field. If the draft model returns nothing (unavailable), a `Re-draft unavailable` notification is shown; if re-drafting throws, a `Re-draft failed` notification is shown. Either way, the form returns to the review menu with the current state unchanged.
 
