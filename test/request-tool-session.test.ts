@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat");
 
 vi.mock("../src/config.js", () => ({
+  getDestinationEnvSets: vi.fn(),
   saveConfig: vi.fn(),
 }));
 
@@ -16,7 +17,7 @@ vi.mock("../src/register-tool.js", () => {
 });
 
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { saveConfig } from "../src/config.js";
+import { getDestinationEnvSets, saveConfig } from "../src/config.js";
 import { registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
 import { registerRequestTool } from "../src/request-tool.js";
 
@@ -164,8 +165,10 @@ describe("request_tool session destination", () => {
     expect(result).toMatchObject({ terminate: true });
   });
 
-  it("does not store project-destination tools in session registry", async () => {
+  it("registers project tools with the saved config's env sets, not in session registry", async () => {
     (sessionRegistry as Map<string, unknown>).clear();
+    const envSets = { common: { TOKEN: "secret" } };
+    vi.mocked(getDestinationEnvSets).mockResolvedValue(envSets);
     (sessionRegistry as Map<string, unknown>).set("run_tests", { name: "run_tests" });
 
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
@@ -204,6 +207,9 @@ describe("request_tool session destination", () => {
       ctx,
     );
 
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ name: "run_tests" }), "project", "/project");
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, expect.objectContaining({ name: "run_tests" }), envSets);
     expect(sessionRegistry.has("run_tests")).toBe(false);
   });
 

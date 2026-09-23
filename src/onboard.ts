@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { saveConfig } from "./config.js";
+import { getDestinationEnvSets, saveConfig } from "./config.js";
 import type { CandidateRequest, DraftAuth, DraftInput, DraftOutput } from "./draft.js";
 import { draftToolDefinition, generateCandidateRequests } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
@@ -257,7 +257,11 @@ async function processCandidate(
     await saveConfig(tool, result.destination, projectRoot);
     sessionRegistry.delete(tool.name);
   }
-  registerArmoryTool(pi, tool);
+  if (result.destination === "session") {
+    registerArmoryTool(pi, tool);
+  } else {
+    registerArmoryTool(pi, tool, await getDestinationEnvSets(result.destination, projectRoot));
+  }
   if (result.destination === "session") {
     sessionRegistry.set(tool.name, tool);
   }

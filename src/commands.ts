@@ -1,6 +1,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool, ToolSource } from "./config.js";
-import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
+import {
+  getDestinationEnvSets,
+  loadToolsWithSource,
+  loadToolWithSource,
+  removeFromConfig,
+  saveConfig,
+} from "./config.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry, toolRegistry } from "./register-tool.js";
 import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
@@ -104,7 +110,7 @@ async function restorePersistedToolIfAny(
 ): Promise<boolean> {
   const found = await loadToolWithSource(name, projectRoot);
   if (!found) return false;
-  registerArmoryTool(pi, found.tool);
+  registerArmoryTool(pi, found.tool, await getDestinationEnvSets(found.source, projectRoot));
   syncToolCondition(pi, cwd, found.tool);
   return true;
 }
@@ -287,7 +293,11 @@ async function handleEdit(
   }
 
   approvalRegistry.delete(sourceName);
-  registerArmoryTool(pi, updatedTool);
+  if (result.destination === "session") {
+    registerArmoryTool(pi, updatedTool);
+  } else {
+    registerArmoryTool(pi, updatedTool, await getDestinationEnvSets(result.destination, deps.projectRoot));
+  }
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
   if (destName !== sourceName) {

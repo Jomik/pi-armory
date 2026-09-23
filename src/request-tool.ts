@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { saveConfig } from "./config.js";
+import { getDestinationEnvSets, saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { buildToolFromResult, resolveModel, showToolEditor, syncToolCondition } from "./shared.js";
@@ -148,7 +148,11 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         await saveConfig(tool, result.destination, projectRoot);
         sessionRegistry.delete(tool.name);
       }
-      registerArmoryTool(pi, tool);
+      if (result.destination === "session") {
+        registerArmoryTool(pi, tool);
+      } else {
+        registerArmoryTool(pi, tool, await getDestinationEnvSets(result.destination, projectRoot));
+      }
       if (result.destination === "session") {
         sessionRegistry.set(tool.name, tool);
       }

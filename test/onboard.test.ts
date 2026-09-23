@@ -7,6 +7,7 @@ import type { CandidateRequest } from "../src/draft.js";
 // ---------------------------------------------------------------------------
 
 vi.mock("../src/config.js", () => ({
+  getDestinationEnvSets: vi.fn().mockResolvedValue({}),
   saveConfig: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -47,7 +48,7 @@ vi.mock("../src/shared.js", () => ({
   syncToolCondition: vi.fn(),
 }));
 
-import { saveConfig } from "../src/config.js";
+import { getDestinationEnvSets, saveConfig } from "../src/config.js";
 import { draftToolDefinition as mockDraft, generateCandidateRequests as mockGenerateCandidates } from "../src/draft.js";
 import { handleOnboard } from "../src/onboard.js";
 import { registerArmoryTool, sessionRegistry } from "../src/register-tool.js";
@@ -325,8 +326,10 @@ describe("handleOnboard — per-candidate flow", () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  it("drafts, shows editor, and registers an approved tool", async () => {
+  it("drafts, shows editor, and registers an approved tool with its destination env sets", async () => {
     const builtTool = { name: "run_tests", command: "npm test", description: "Run the test suite" };
+    const envSets = { common: { TOKEN: "secret" } };
+    vi.mocked(getDestinationEnvSets).mockResolvedValueOnce(envSets);
     vi.mocked(showToolEditor).mockResolvedValue(sampleEditorResult);
     vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
 
@@ -347,7 +350,8 @@ describe("handleOnboard — per-candidate flow", () => {
       expect.objectContaining({ command: "npm test" }),
     );
     expect(saveConfig).toHaveBeenCalledWith(builtTool, "project", "/project");
-    expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool);
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool, envSets);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 tool registered"), "info");
   });
 
@@ -494,7 +498,7 @@ describe("handleOnboard — per-candidate flow", () => {
       "provider:model",
       expect.anything(),
     );
-    expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool, {});
     // syncToolCondition is mocked here — assert it is invoked with the built tool rather
     // than asserting real pi active-state changes, which only the unmocked helper performs.
     expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, builtTool);

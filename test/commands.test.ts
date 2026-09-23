@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 
 vi.mock("../src/config.js", () => ({
+  getDestinationEnvSets: vi.fn(),
   loadToolsWithSource: vi.fn(),
   loadToolWithSource: vi.fn(),
   removeFromConfig: vi.fn(),
@@ -35,7 +36,13 @@ vi.mock("../src/onboard.js", () => ({
 }));
 
 import { type ArmoryCommandDeps, registerArmoryCommand } from "../src/commands.js";
-import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "../src/config.js";
+import {
+  getDestinationEnvSets,
+  loadToolsWithSource,
+  loadToolWithSource,
+  removeFromConfig,
+  saveConfig,
+} from "../src/config.js";
 import { handleOnboard } from "../src/onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry, toolRegistry } from "../src/register-tool.js";
 import { buildToolFromResult, showToolEditor, syncToolCondition } from "../src/shared.js";
@@ -98,6 +105,8 @@ describe("handleEdit", () => {
     toolRegistry.clear();
     vi.mocked(loadToolsWithSource).mockReset();
     vi.mocked(loadToolWithSource).mockReset();
+    vi.mocked(getDestinationEnvSets).mockReset();
+    vi.mocked(getDestinationEnvSets).mockResolvedValue({});
     vi.mocked(saveConfig).mockResolvedValue(undefined);
     vi.mocked(removeFromConfig).mockResolvedValue(undefined);
     vi.mocked(registerArmoryTool).mockClear();
@@ -223,8 +232,14 @@ describe("handleEdit", () => {
       description: "Session shadow",
     };
     const promotedTool = { name: "watch_tests", command: "npm test -- --watch", description: "Session shadow" };
+    const shadowedTool: ArmoryTool = { ...toolProject, envFrom: ["global_env"] };
     sessionRegistry.set("run_tests", sessionShadow);
-    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+    const projectSets = { project_env: { TOKEN: "project" } };
+    const globalSets = { global_env: { TOKEN: "global" } };
+    vi.mocked(getDestinationEnvSets).mockImplementation(async (source) =>
+      source === "project" ? projectSets : globalSets,
+    );
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: shadowedTool, source: "global" });
     vi.mocked(showToolEditor).mockResolvedValue({
       name: "watch_tests",
       command: "npm test -- --watch",
@@ -236,7 +251,7 @@ describe("handleEdit", () => {
     vi.mocked(buildToolFromResult).mockReturnValue(promotedTool);
 
     const pi = makePi();
-    const deps = makeDeps({ tools: [toolProject] });
+    const deps = makeDeps({ tools: [shadowedTool] });
     const ctx = makeCtx({ selectResponses: ["Confirm"] });
     registerArmoryCommand(pi as never, deps);
     const handler = getHandler(pi);
@@ -245,10 +260,11 @@ describe("handleEdit", () => {
     expect(saveConfig).toHaveBeenCalledWith(promotedTool, "project", "/project");
     expect(removeFromConfig).not.toHaveBeenCalled();
     expect(sessionRegistry.has("run_tests")).toBe(false);
-    expect(deps.tools).toContainEqual(toolProject);
+    expect(deps.tools).toContainEqual(shadowedTool);
     expect(deps.tools).toContainEqual(promotedTool);
-    expect(registerArmoryTool).toHaveBeenCalledWith(pi, promotedTool);
-    expect(registerArmoryTool).toHaveBeenCalledWith(pi, toolProject);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, promotedTool, projectSets);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, shadowedTool, globalSets);
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
   });
 
   it("demoting project → session requires confirmation and removes from config", async () => {
@@ -391,6 +407,8 @@ describe("handleEdit", () => {
 
   it("same-destination persisted edit forwards env sets and inline env without confirmation", async () => {
     const existingTool: ArmoryTool = { ...toolProject, envFrom: ["common"], env: { INLINE: "value" } };
+    const envSets = { common: { TOKEN: "secret" } };
+    vi.mocked(getDestinationEnvSets).mockResolvedValue(envSets);
     vi.mocked(loadToolWithSource).mockResolvedValue({ tool: existingTool, source: "project" });
     const updatedTool = { ...existingTool, command: "npm test --watch" };
     vi.mocked(showToolEditor).mockResolvedValue({
@@ -417,7 +435,28 @@ describe("handleEdit", () => {
       { env: existingTool.env, envFrom: existingTool.envFrom },
     );
     expect(saveConfig).toHaveBeenCalledWith(updatedTool, "project", "/project");
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, updatedTool, envSets);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Tool 'run_tests' updated", "info");
+  });
+
+  it("does not register a persisted edit when its env sets cannot be loaded", async () => {
+    vi.mocked(loadToolWithSource).mockResolvedValue({ tool: toolProject, source: "project" });
+    vi.mocked(showToolEditor).mockResolvedValue({
+      name: "run_tests",
+      command: "npm test --watch",
+      description: "Run tests",
+      guidelines: [],
+      requiresApproval: false,
+      destination: "project",
+    });
+    vi.mocked(buildToolFromResult).mockReturnValue({ ...toolProject, command: "npm test --watch" });
+    vi.mocked(getDestinationEnvSets).mockRejectedValue(new Error("invalid config"));
+
+    const pi = makePi();
+    registerArmoryCommand(pi as never, makeDeps());
+    await expect(getHandler(pi)("edit run_tests", makeCtx() as never)).rejects.toThrow("invalid config");
+    expect(registerArmoryTool).not.toHaveBeenCalled();
   });
 
   it("aborts without changes when the edited name is invalid/empty", async () => {
@@ -571,6 +610,8 @@ describe("handleDelete", () => {
     toolRegistry.clear();
     vi.mocked(loadToolsWithSource).mockReset();
     vi.mocked(loadToolWithSource).mockReset();
+    vi.mocked(getDestinationEnvSets).mockReset();
+    vi.mocked(getDestinationEnvSets).mockResolvedValue({});
     vi.mocked(removeFromConfig).mockResolvedValue(undefined);
     vi.mocked(registerArmoryTool).mockClear();
   });
@@ -647,9 +688,12 @@ describe("handleDelete", () => {
       command: "jj st",
       description: "Revealed persisted tool",
       when: "jj",
+      envFrom: ["global_env"],
     };
+    const envSets = { global_env: { TOKEN: "global-secret" } };
+    vi.mocked(getDestinationEnvSets).mockResolvedValue(envSets);
     sessionRegistry.set("run_tests", toolSession);
-    vi.mocked(loadToolWithSource).mockResolvedValueOnce({ tool: conditionedTool, source: "project" });
+    vi.mocked(loadToolWithSource).mockResolvedValueOnce({ tool: conditionedTool, source: "global" });
 
     const pi = makePi();
     const deps = makeDeps({ tools: [conditionedTool] });
@@ -658,7 +702,8 @@ describe("handleDelete", () => {
     const handler = getHandler(pi);
     await handler("delete run_tests", ctx as never);
 
-    expect(registerArmoryTool).toHaveBeenCalledWith(pi, conditionedTool);
+    expect(getDestinationEnvSets).toHaveBeenCalledWith("global", "/project");
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, conditionedTool, envSets);
     expect(syncToolCondition).toHaveBeenCalledWith(pi, ctx.cwd, conditionedTool);
   });
 
