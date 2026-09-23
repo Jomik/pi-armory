@@ -215,6 +215,13 @@ async function processCandidate(
     return "skipped";
   }
 
+  // Load both destinations independently so an unavailable scope cannot block the other.
+  const [projectSets, globalSets] = await Promise.all([
+    getDestinationEnvSets("project", projectRoot).catch(() => ({})),
+    getDestinationEnvSets("global", projectRoot).catch(() => ({})),
+  ]);
+  const envSets = { project: projectSets, global: globalSets };
+
   // Show tool editor — same as request_tool
   const result = await showToolEditor(
     ctx,
@@ -227,6 +234,7 @@ async function processCandidate(
       requiresApproval: drafted.requires_approval,
       destination: drafted.destination,
       when: drafted.when,
+      envSets,
     },
     draftModelName,
     draftInput,
@@ -250,17 +258,19 @@ async function processCandidate(
     return "skipped";
   }
 
-  const tool = buildToolFromResult({ ...result, name });
+  const tool = buildToolFromResult({
+    ...result,
+    name,
+    ...(result.destination === "session" ? { envFrom: [] } : {}),
+  });
 
   // Save and register — identical logic to request_tool
-  if (result.destination !== "session") {
-    await saveConfig(tool, result.destination, projectRoot);
-    sessionRegistry.delete(tool.name);
-  }
   if (result.destination === "session") {
     registerArmoryTool(pi, tool);
   } else {
-    registerArmoryTool(pi, tool, await getDestinationEnvSets(result.destination, projectRoot));
+    const savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+    sessionRegistry.delete(tool.name);
+    registerArmoryTool(pi, tool, savedSets);
   }
   if (result.destination === "session") {
     sessionRegistry.set(tool.name, tool);

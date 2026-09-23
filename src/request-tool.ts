@@ -97,6 +97,12 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         throw new Error(`Draft rejected${reason}`);
       }
 
+      const [projectSets, globalSets] = await Promise.all([
+        getDestinationEnvSets("project", projectRoot).catch(() => ({})),
+        getDestinationEnvSets("global", projectRoot).catch(() => ({})),
+      ]);
+      const envSets = { project: projectSets, global: globalSets };
+
       const result = await showToolEditor(
         ctx,
         {
@@ -107,6 +113,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           requiresApproval: drafted?.requires_approval ?? false,
           destination: drafted?.destination ?? "session",
           ...(drafted?.when ? { when: drafted.when } : {}),
+          envSets,
         },
         draftModelName,
         {
@@ -142,16 +149,18 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
-      const tool = buildToolFromResult({ ...result, name });
+      const tool = buildToolFromResult({
+        ...result,
+        name,
+        ...(result.destination === "session" ? { envFrom: [] } : {}),
+      });
 
-      if (result.destination !== "session") {
-        await saveConfig(tool, result.destination, projectRoot);
-        sessionRegistry.delete(tool.name);
-      }
       if (result.destination === "session") {
         registerArmoryTool(pi, tool);
       } else {
-        registerArmoryTool(pi, tool, await getDestinationEnvSets(result.destination, projectRoot));
+        const savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination]);
+        sessionRegistry.delete(tool.name);
+        registerArmoryTool(pi, tool, savedSets);
       }
       if (result.destination === "session") {
         sessionRegistry.set(tool.name, tool);

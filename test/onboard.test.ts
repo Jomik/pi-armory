@@ -8,7 +8,7 @@ import type { CandidateRequest } from "../src/draft.js";
 
 vi.mock("../src/config.js", () => ({
   getDestinationEnvSets: vi.fn().mockResolvedValue({}),
-  saveConfig: vi.fn().mockResolvedValue(undefined),
+  saveConfig: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("../src/register-tool.js", () => {
@@ -320,6 +320,8 @@ describe("handleOnboard — multi-select", () => {
 describe("handleOnboard — per-candidate flow", () => {
   beforeEach(() => {
     sessionRegistry.clear();
+    vi.mocked(getDestinationEnvSets).mockReset().mockResolvedValue({});
+    vi.mocked(saveConfig).mockReset().mockResolvedValue({});
     vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate]);
     vi.mocked(mockDraft).mockResolvedValue(sampleDraft);
   });
@@ -329,7 +331,8 @@ describe("handleOnboard — per-candidate flow", () => {
   it("drafts, shows editor, and registers an approved tool with its destination env sets", async () => {
     const builtTool = { name: "run_tests", command: "npm test", description: "Run the test suite" };
     const envSets = { common: { TOKEN: "secret" } };
-    vi.mocked(getDestinationEnvSets).mockResolvedValueOnce(envSets);
+    vi.mocked(getDestinationEnvSets).mockImplementation(async (dest) => dest === "project" ? envSets : {});
+    vi.mocked(saveConfig).mockResolvedValue(envSets);
     vi.mocked(showToolEditor).mockResolvedValue(sampleEditorResult);
     vi.mocked(buildToolFromResult).mockReturnValue(builtTool);
 
@@ -349,7 +352,7 @@ describe("handleOnboard — per-candidate flow", () => {
       "provider:model",
       expect.objectContaining({ command: "npm test" }),
     );
-    expect(saveConfig).toHaveBeenCalledWith(builtTool, "project", "/project");
+    expect(saveConfig).toHaveBeenCalledWith(builtTool, "project", "/project", undefined, envSets);
     expect(getDestinationEnvSets).toHaveBeenCalledWith("project", "/project");
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool, envSets);
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("1 tool registered"), "info");
@@ -367,8 +370,51 @@ describe("handleOnboard — per-candidate flow", () => {
     await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
 
     expect(saveConfig).not.toHaveBeenCalled();
+    expect(buildToolFromResult).toHaveBeenCalledWith(expect.objectContaining({ destination: "session", envFrom: [] }));
     expect(registerArmoryTool).toHaveBeenCalledWith(pi, builtTool);
     expect(sessionRegistry.get("run_tests")).toEqual(builtTool);
+  });
+
+  it.each(["project", "global"] as const)("passes %s selection through save and immediate registration", async (destination) => {
+    const displayed = { common: { TOKEN: "value" } };
+    const saved = { ...displayed, later: { X: "new" } };
+    vi.mocked(getDestinationEnvSets).mockImplementation(async (scope) => scope === destination ? displayed : {});
+    vi.mocked(saveConfig).mockResolvedValue(saved);
+    vi.mocked(showToolEditor).mockResolvedValue({ ...sampleEditorResult, destination, envFrom: ["common"] });
+    const tool: ArmoryTool = { name: "run_tests", command: "npm test", description: "Run tests", envFrom: ["common"] };
+    vi.mocked(buildToolFromResult).mockReturnValue(tool);
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+    await handleOnboard(pi as never, ctx as never, "/project", "provider:model");
+    expect(showToolEditor).toHaveBeenCalledWith(ctx,
+      expect.objectContaining({ envSets: { project: destination === "project" ? displayed : {},
+        global: destination === "global" ? displayed : {} } }), "provider:model", expect.anything());
+    expect(saveConfig).toHaveBeenCalledWith(tool, destination, "/project", undefined, displayed);
+    expect(registerArmoryTool).toHaveBeenCalledWith(pi, tool, saved);
+    expect(getDestinationEnvSets).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a valid destination despite invalid unrelated config; failed save leaves registries alone", async () => {
+    vi.mocked(getDestinationEnvSets).mockImplementation(async (scope) => {
+      if (scope === "project") throw new Error("Invalid config");
+      return { common: { TOKEN: "value" } };
+    });
+    vi.mocked(saveConfig).mockRejectedValue(new Error("Selected env set changed; reload before saving"));
+    vi.mocked(showToolEditor).mockResolvedValue({ ...sampleEditorResult, destination: "global", envFrom: ["common"] });
+    vi.mocked(buildToolFromResult).mockReturnValue({ name: "run_tests", command: "npm test", description: "Run tests", envFrom: ["common"] });
+    sessionRegistry.set("run_tests", { name: "old" });
+    const pi = makePi();
+    const ctx = makeCtx({ selectResponses: ["Toggle 1", "Confirm"] });
+    await expect(handleOnboard(pi as never, ctx as never, "/project", "provider:model"))
+      .rejects.toThrow("Selected env set changed");
+    expect(showToolEditor).toHaveBeenCalledWith(ctx,
+      expect.objectContaining({ envSets: { project: {}, global: { common: { TOKEN: "value" } } } }),
+      "provider:model", expect.anything());
+    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ envFrom: ["common"] }),
+      "global", "/project", undefined, { common: { TOKEN: "value" } });
+    expect(registerArmoryTool).not.toHaveBeenCalled();
+    expect(sessionRegistry.get("run_tests")).toEqual({ name: "old" });
+    expect(syncToolCondition).not.toHaveBeenCalled();
   });
 
   it("skips a candidate when user rejects in editor and continues", async () => {
