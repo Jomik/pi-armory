@@ -107,7 +107,7 @@ describe("handleEdit", () => {
     vi.mocked(loadToolWithSource).mockReset();
     vi.mocked(getDestinationEnvSets).mockReset();
     vi.mocked(getDestinationEnvSets).mockResolvedValue({});
-    vi.mocked(saveConfig).mockResolvedValue(undefined);
+    vi.mocked(saveConfig).mockResolvedValue({});
     vi.mocked(removeFromConfig).mockResolvedValue(undefined);
     vi.mocked(registerArmoryTool).mockClear();
   });
