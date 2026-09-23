@@ -440,7 +440,7 @@ describe("request_tool session destination", () => {
     "project",
   ] as const)("refuses a normalized session name collision for %s creation", async (destination) => {
     (sessionRegistry as Map<string, unknown>).clear();
-    const existing = { name: "run_tests", command: "echo existing" };
+    const existing = { name: "run_tests", command: "echo existing", description: "Existing tool" };
     sessionRegistry.set("run_tests", existing);
     let requestTool: { execute: (...args: unknown[]) => Promise<unknown> } | undefined;
     const pi = {

@@ -450,7 +450,7 @@ describe("handleOnboard — per-candidate flow", () => {
 
   it("skips a normalized session name collision and continues the batch", async () => {
     const secondCandidate: CandidateRequest = { label: "Lint", command: "biome check", reasoning: "Lint code." };
-    const oldTool = { name: "run_tests", command: "echo existing" };
+    const oldTool = { name: "run_tests", command: "echo existing", description: "Existing tool" };
     const lintTool = { name: "lint", command: "biome check", description: "Lint" };
     sessionRegistry.set("run_tests", oldTool);
     vi.mocked(mockGenerateCandidates).mockResolvedValue([sampleCandidate, secondCandidate]);
@@ -471,7 +471,7 @@ describe("handleOnboard — per-candidate flow", () => {
   });
 
   it("skips a persisted candidate colliding with a session tool before saving", async () => {
-    const oldTool = { name: "run_tests", command: "echo existing" };
+    const oldTool = { name: "run_tests", command: "echo existing", description: "Existing tool" };
     sessionRegistry.set("run_tests", oldTool);
     vi.mocked(showToolEditor).mockResolvedValue(sampleEditorResult);
     const pi = makePi();
