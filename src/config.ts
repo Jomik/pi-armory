@@ -118,7 +118,12 @@ async function writeConfigFile(filePath: string, config: ArmoryConfig): Promise<
 export async function loadConfig(
   projectRoot: string,
   agentDir: string = getAgentDir(),
-): Promise<{ tools: ArmoryTool[]; envSetsByTool?: Record<string, EnvSets>; draftModel?: string; disableBash: boolean }> {
+): Promise<{
+  tools: ArmoryTool[];
+  envSetsByTool?: Record<string, EnvSets>;
+  draftModel?: string;
+  disableBash: boolean;
+}> {
   const globalPath = path.join(agentDir, "armory.json");
   const projectPath = path.join(projectRoot, ".pi", "armory.json");
 
