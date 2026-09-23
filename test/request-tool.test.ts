@@ -239,12 +239,22 @@ describe("buildToolFromResult", () => {
     destination: "session",
   };
 
-  it("preserves env sets alongside inline env bindings", () => {
-    const envFrom = ["common", "extra"];
+  it("uses selected env sets over existing sets while preserving inline env and when", () => {
     const env = { INLINE: "value" };
-    const tool = buildToolFromResult(baseResult, { envFrom, env });
-    expect(tool.envFrom).toEqual(envFrom);
+    const tool = buildToolFromResult({ ...baseResult, envFrom: ["new"], when: "jj" }, { envFrom: ["old"], env });
+    expect(tool.envFrom).toEqual(["new"]);
     expect(tool.env).toEqual(env);
+    expect(tool.when).toBe("jj");
+  });
+
+  it("clears existing env sets when the result explicitly selects none", () => {
+    const tool = buildToolFromResult({ ...baseResult, envFrom: [] }, { envFrom: ["old"] });
+    expect(tool.envFrom).toEqual([]);
+  });
+
+  it("preserves existing env sets when the result omits envFrom", () => {
+    const tool = buildToolFromResult(baseResult, { envFrom: ["old"] });
+    expect(tool.envFrom).toEqual(["old"]);
   });
 
   it("preserves the when condition on the built tool", () => {

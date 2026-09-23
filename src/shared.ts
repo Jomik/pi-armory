@@ -83,7 +83,7 @@ export function buildToolFromResult(result: ToolFormResult, opts?: Pick<ArmoryTo
     ...(result.requiresApproval ? { requires_approval: true } : {}),
     ...(result.guidelines.length > 0 ? { guidelines: result.guidelines } : {}),
     ...(opts?.env ? { env: opts.env } : {}),
-    ...(opts?.envFrom ? { envFrom: opts.envFrom } : {}),
+    ...("envFrom" in result ? { envFrom: result.envFrom } : opts?.envFrom ? { envFrom: opts.envFrom } : {}),
     ...(result.when ? { when: result.when } : {}),
   };
 }
