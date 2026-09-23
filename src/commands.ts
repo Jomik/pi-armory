@@ -280,7 +280,10 @@ async function handleEdit(
     (result.destination !== "session" &&
       (!destinationEnvSets || selectedEnvFrom.some((setName) => !Object.hasOwn(destinationEnvSets, setName))))
   ) {
-    ctx.ui.notify("Environment set selection is unavailable for this destination. Review the config and retry.", "error");
+    ctx.ui.notify(
+      "Environment set selection is unavailable for this destination. Review the config and retry.",
+      "error",
+    );
     return;
   }
 
