@@ -312,7 +312,22 @@ async function handleEdit(
     // Session → project/global: persist and remove from session. If the session tool
     // shadowed a persisted tool and was renamed, leave the shadowed tool intact.
     try {
-      savedEnvSets = await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
+      const existing = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+      if (existing) {
+        ctx.ui.notify(
+          `Tool '${destName}' already exists in the destination config. Rename it or remove the existing tool and retry.`,
+          "error",
+        );
+        return;
+      }
+      savedEnvSets = await saveConfig(
+        updatedTool,
+        result.destination,
+        deps.projectRoot,
+        undefined,
+        destinationEnvSets,
+        true,
+      );
     } catch {
       ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
       return;
@@ -325,7 +340,7 @@ async function handleEdit(
   } else if (source !== "session" && result.destination === "session") {
     // Project/global → session: remove from config and keep in-memory only
     try {
-      await removeFromConfig(sourceName, source, deps.projectRoot);
+      await removeFromConfig(sourceName, source, deps.projectRoot, undefined, tool);
     } catch {
       ctx.ui.notify("Could not remove tool from source config. Fix the config and retry.", "error");
       return;
@@ -442,7 +457,12 @@ async function handleDelete(
   if (source === "session") {
     sessionRegistry.delete(tool.name);
   } else {
-    await removeFromConfig(tool.name, source as "project" | "global", deps.projectRoot);
+    try {
+      await removeFromConfig(tool.name, source, deps.projectRoot, undefined, tool);
+    } catch {
+      ctx.ui.notify("Could not remove tool from source config. Review the config and retry.", "error");
+      return;
+    }
     const idx = deps.tools.findIndex((t) => t.name === tool.name);
     if (idx !== -1) deps.tools.splice(idx, 1);
   }
