@@ -40,7 +40,8 @@ Tools are defined in `.pi/armory.json` (project-local) or `~/.pi/agent/armory.js
 
 Top-level config fields:
 
-- `tools`: command tool definitions.
+- `tools`: array of command tool definitions; names must be unique within each file.
+- `envSets`: optional map of set names to maps of environment variable bindings, selected by tools in the same file.
 - `draftModel`: optional `"provider:modelId"` used to draft/re-draft tool definitions. Project config overrides global config.
 - `disableBash`: optional global-config boolean; defaults to `true`. Set `false` in `~/.pi/agent/armory.json` to keep pi's built-in `bash` tool active. Project-local `disableBash` is ignored.
 
@@ -115,6 +116,8 @@ Agent calls: request_tool({
 
 When no draft model is configured, or when the draft does not choose a destination, the destination falls back to **Session**. This keeps the armory clean: tools are only persisted when you explicitly promote them.
 
+The form's **Env sets** multi-select lists only set names for the chosen Project or Global destination, not definitions, values, or resolver commands. Only the human selects sets; re-drafting leaves selections unchanged. Session tools cannot use sets. Switching destinations keeps selections, but a missing set or a same-name set with a different definition is marked unresolved until deselected and reselected in the new destination. Approval requires resolving these selections; saving also rejects stale or missing sets and duplicate environment keys before writing.
+
 If the draft model determines it lacks sufficient context (e.g., command references a script whose contents weren't provided), it rejects the request with a reason. The agent receives the rejection message and can retry with additional context.
 
 Tool names are automatically normalized: lowercased, spaces/dashes collapsed to underscores, and any character that isn't a lowercase letter, digit, or underscore is stripped. The normalized name must start with a letter (leading digits/underscores are stripped). `request_tool` is a reserved name and cannot be used for a registered tool.
@@ -133,7 +136,7 @@ Edits are schema-validated; once valid, the view returns to the approval panel b
 
 ### Environment variables
 
-Tools can inject environment variables into their subprocess via the `env` field. There's one `env` map — no separate `secrets` field. Each value is a binding:
+Tools can inject environment variables into their subprocess via an inline `env` map and/or named sets. Top-level `envSets` defines reusable binding maps; a tool's `envFrom` array explicitly selects sets from its own config file. Sets are never injected implicitly or inherited across project/global files, even when names match. Selected sets and inline `env` can be combined only when their environment variable keys do not overlap; repeated set names and missing sets are invalid. There is no separate `secrets` field. Each value is a binding:
 
 - A plain string — a **public literal**, used verbatim.
 - `{ "env": "HOST_NAME", "secret"?: boolean }` — reads a host environment variable.
@@ -141,25 +144,34 @@ Tools can inject environment variables into their subprocess via the `env` field
 
 ```json
 {
-  "name": "deploy",
-  "command": "./deploy.sh {{target}}",
-  "description": "Deploy to target environment",
-  "env": {
-    "SERVER_URL": "https://deploy.example.com",
-    "GITHUB_TOKEN": { "command": "gh auth token", "secret": true },
-    "API_TOKEN": {
-      "command": "security find-generic-password -s pi-armory -a api-token -w",
-      "secret": true
+  "envSets": {
+    "deploy_target": {
+      "SERVER_URL": "https://deploy.example.com",
+      "REGION": { "env": "DEPLOY_REGION" }
+    },
+    "deploy_auth": {
+      "GITHUB_TOKEN": { "command": "gh auth token", "secret": true }
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "deploy",
+      "command": "./deploy.sh {{target}}",
+      "description": "Deploy to target environment",
+      "envFrom": ["deploy_target", "deploy_auth"],
+      "env": { "DEPLOY_MODE": "staging" }
+    }
+  ]
 }
 ```
 
 Set `secret: true` on an `env`/`command` binding (not available on literals) to redact its resolved value — whenever nonempty — from the main command's output. Whenever any binding's resolved secret value is nonempty, streaming updates are suppressed entirely for that invocation (to avoid leaking a secret split across chunk boundaries); the caller only receives the final, fully redacted success or error output.
 
-Bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
+Selected set and inline bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
 
 If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Generic failure suppression for `secret: true` bindings applies specifically to a failing `{ command }` resolver: the error is reported without leaking resolver output or diagnostics. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Failures on non-secret bindings keep their full diagnostic detail.
+
+Legacy `secrets` fields make a config file invalid; old `$VAR` and `$$` strings are now literal values, not substitution syntax. Migrate existing global config manually to `env`/`envSets` bindings; there is no automatic migration. An invalid config file is ignored in full with a warning, and saves refuse to overwrite it.
 
 > **No built-in secret store.** Armory has no secrets store and no `/armory secrets` UI. Use a `command` binding that calls your credential's own provider or CLI — e.g. `gh auth token` for the GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored yourself in the macOS Keychain. You manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
@@ -205,6 +217,8 @@ If you change the **Destination** field, a confirmation is shown before the chan
 Renaming a tool during edit uses the same normalization, validation, and reserved-name rules as `request_tool`: the name is lowercased and normalized, must contain at least one letter, and cannot be `request_tool`. If the result is invalid or reserved, a notification explains why and the edit aborts with no config or registry changes.
 
 Cancelling the confirmation aborts the edit — no config or registry is modified.
+
+Editing preserves existing `envFrom` selections unless you clear or change them explicitly in the form. Moving a set-backed tool to another scope requires selecting compatible sets there; moving it to Session clears `envFrom`. A move is refused if its selections cannot be resolved in the destination. Creating or moving a tool rejects same-scope or session-name collisions rather than silently overwriting another tool. The form selects existing sets only; it does not edit set definitions or group tools.
 
 When editing, AI re-draft can be invoked from the Re-draft field. If the draft model returns nothing (unavailable), a `Re-draft unavailable` notification is shown; if re-drafting throws, a `Re-draft failed` notification is shown. Either way, the form returns to the review menu with the current state unchanged.
 
