@@ -30,6 +30,9 @@
                 },
                 {
                   "type": "object",
+                  "required": [
+                    "env"
+                  ],
                   "properties": {
                     "env": {
                       "type": "string",
@@ -41,14 +44,14 @@
                       "description": "Redact the resolved value from all tool output."
                     }
                   },
-                  "required": [
-                    "env"
-                  ],
                   "additionalProperties": false,
                   "description": "Resolves from the host process environment."
                 },
                 {
                   "type": "object",
+                  "required": [
+                    "command"
+                  ],
                   "properties": {
                     "command": {
                       "type": "string",
@@ -60,9 +63,6 @@
                       "description": "Redact the resolved value from all tool output."
                     }
                   },
-                  "required": [
-                    "command"
-                  ],
                   "additionalProperties": false,
                   "description": "Resolves by running a shell command."
                 }
@@ -82,7 +82,6 @@
           "command",
           "description"
         ],
-        "additionalProperties": false,
         "properties": {
           "name": {
             "type": "string"
@@ -113,6 +112,9 @@
                   },
                   {
                     "type": "object",
+                    "required": [
+                      "env"
+                    ],
                     "properties": {
                       "env": {
                         "type": "string",
@@ -124,14 +126,14 @@
                         "description": "Redact the resolved value from all tool output."
                       }
                     },
-                    "required": [
-                      "env"
-                    ],
                     "additionalProperties": false,
                     "description": "Resolves from the host process environment."
                   },
                   {
                     "type": "object",
+                    "required": [
+                      "command"
+                    ],
                     "properties": {
                       "command": {
                         "type": "string",
@@ -143,9 +145,6 @@
                         "description": "Redact the resolved value from all tool output."
                       }
                     },
-                    "required": [
-                      "command"
-                    ],
                     "additionalProperties": false,
                     "description": "Resolves by running a shell command."
                   }
@@ -174,7 +173,8 @@
             ],
             "description": "Restricts the tool to sessions whose workspace matches this repository type. \"jj\" requires a Jujutsu repository; \"git\" requires a Git repository that is not also a Jujutsu repository. Omit to make the tool available in every workspace."
           }
-        }
+        },
+        "additionalProperties": false
       }
     }
   }
