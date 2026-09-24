@@ -18,20 +18,37 @@ export interface ExecuteOptions {
   onUpdate?: (content: string) => void;
   extraEnv?: Record<string, string>;
   redact?: string[];
+  /**
+   * When true, a successful call resolves with stdout only (stderr is
+   * excluded from the resolved value). Default behavior (false or omitted)
+   * resolves with combined stdout+stderr, unchanged.
+   *
+   * On failure, behavior is unaffected: the rejection error always includes
+   * combined stdout+stderr context regardless of this option.
+   */
+  stdoutOnly?: boolean;
 }
 
 function applyRedaction(text: string, redact?: string[]): string {
   if (!redact || redact.length === 0) return text;
+  const uniqueSecrets = Array.from(new Set(redact.filter((secret) => !!secret)));
+  // Process longest-first so overlapping secrets (e.g. "abc" and "abcdef")
+  // don't leave remnants of a longer secret visible after a shorter one is
+  // redacted first.
+  uniqueSecrets.sort((a, b) => b.length - a.length);
   let result = text;
-  for (const secret of redact) {
-    if (!secret) continue;
+  for (const secret of uniqueSecrets) {
     result = result.split(secret).join("[REDACTED]");
   }
   return result;
 }
 
+function hasEffectiveRedact(redact?: string[]): boolean {
+  return !!redact && redact.some((secret) => !!secret);
+}
+
 export async function executeCommand(command: string, options: ExecuteOptions): Promise<string> {
-  const { cwd, signal, onUpdate, extraEnv, redact } = options;
+  const { cwd, signal, onUpdate, extraEnv, redact, stdoutOnly } = options;
 
   return new Promise<string>((resolve, reject) => {
     const proc = spawn("sh", ["-c", command], {
@@ -41,19 +58,25 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       detached: process.platform !== "win32",
     });
 
-    const decoder = new TextDecoder("utf-8");
-    let output = "";
+    const stdoutDecoder = new TextDecoder("utf-8");
+    const stderrDecoder = new TextDecoder("utf-8");
+    let stdoutOutput = "";
+    let combinedOutput = "";
     let lastFlushed = "";
     let settled = false;
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+    // When there is at least one nonempty secret to redact, streaming updates
+    // are suppressed entirely to avoid disclosing a secret split across
+    // chunk boundaries. Final success/error output remains fully redacted.
+    const suppressUpdates = hasEffectiveRedact(redact);
 
     function scheduleFlush() {
-      if (throttleTimer !== null || !onUpdate || settled) return;
+      if (throttleTimer !== null || !onUpdate || settled || suppressUpdates) return;
       throttleTimer = setTimeout(() => {
         throttleTimer = null;
-        if (!settled && output !== lastFlushed) {
-          lastFlushed = output;
-          onUpdate(applyRedaction(output, redact));
+        if (!settled && combinedOutput !== lastFlushed) {
+          lastFlushed = combinedOutput;
+          onUpdate(applyRedaction(combinedOutput, redact));
         }
       }, 100);
     }
@@ -63,19 +86,27 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
         clearTimeout(throttleTimer);
         throttleTimer = null;
       }
-      if (onUpdate && output !== lastFlushed) {
-        lastFlushed = output;
-        onUpdate(applyRedaction(output, redact));
+      if (onUpdate && !suppressUpdates && combinedOutput !== lastFlushed) {
+        lastFlushed = combinedOutput;
+        onUpdate(applyRedaction(combinedOutput, redact));
       }
     }
 
-    function handleData(chunk: Buffer) {
-      output += decoder.decode(chunk, { stream: true });
+    function handleStdout(chunk: Buffer) {
+      const text = stdoutDecoder.decode(chunk, { stream: true });
+      stdoutOutput += text;
+      combinedOutput += text;
       if (onUpdate) scheduleFlush();
     }
 
-    proc.stdout.on("data", handleData);
-    proc.stderr.on("data", handleData);
+    function handleStderr(chunk: Buffer) {
+      const text = stderrDecoder.decode(chunk, { stream: true });
+      combinedOutput += text;
+      if (onUpdate) scheduleFlush();
+    }
+
+    proc.stdout.on("data", handleStdout);
+    proc.stderr.on("data", handleStderr);
 
     proc.on("error", (err) => {
       if (settled) return;
@@ -124,14 +155,18 @@ export async function executeCommand(command: string, options: ExecuteOptions): 
       settled = true;
 
       // Flush any remaining decoder state
-      output += decoder.decode();
+      const remainingStdout = stdoutDecoder.decode();
+      const remainingStderr = stderrDecoder.decode();
+      stdoutOutput += remainingStdout;
+      combinedOutput += remainingStdout + remainingStderr;
       flushFinal();
 
       const exitCode = code ?? (killSignal ? 1 : 0);
       if (exitCode === 0) {
-        resolve(applyRedaction(output, redact));
+        const resultText = stdoutOnly ? stdoutOutput : combinedOutput;
+        resolve(applyRedaction(resultText, redact));
       } else {
-        reject(new Error(`${applyRedaction(output, redact)}\n\nCommand exited with code ${exitCode}`));
+        reject(new Error(`${applyRedaction(combinedOutput, redact)}\n\nCommand exited with code ${exitCode}`));
       }
     });
   });

@@ -2,7 +2,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { saveConfig } from "./config.js";
+import { getDestinationEnvSets, saveConfig } from "./config.js";
 import { type DraftOutput, draftToolDefinition } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
 import { buildToolFromResult, resolveModel, showToolEditor, syncToolCondition } from "./shared.js";
@@ -97,6 +97,12 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         throw new Error(`Draft rejected${reason}`);
       }
 
+      const [projectSets, globalSets] = await Promise.all([
+        getDestinationEnvSets("project", projectRoot).catch(() => ({})),
+        getDestinationEnvSets("global", projectRoot).catch(() => ({})),
+      ]);
+      const envSets = { project: projectSets, global: globalSets };
+
       const result = await showToolEditor(
         ctx,
         {
@@ -107,6 +113,7 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
           requiresApproval: drafted?.requires_approval ?? false,
           destination: drafted?.destination ?? "session",
           ...(drafted?.when ? { when: drafted.when } : {}),
+          envSets,
         },
         draftModelName,
         {
@@ -142,13 +149,29 @@ export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draft
         };
       }
 
-      const tool = buildToolFromResult({ ...result, name });
-
-      if (result.destination !== "session") {
-        await saveConfig(tool, result.destination, projectRoot);
-        sessionRegistry.delete(tool.name);
+      if (sessionRegistry.has(name)) {
+        throw new Error(`Tool name '${name}' is already used by a session tool. Choose another name.`);
       }
-      registerArmoryTool(pi, tool);
+
+      const tool = buildToolFromResult({
+        ...result,
+        name,
+        ...(result.destination === "session" ? { envFrom: [] } : {}),
+      });
+
+      if (result.destination === "session") {
+        registerArmoryTool(pi, tool);
+      } else {
+        const savedSets = await saveConfig(
+          tool,
+          result.destination,
+          projectRoot,
+          undefined,
+          envSets[result.destination],
+          true,
+        );
+        registerArmoryTool(pi, tool, savedSets);
+      }
       if (result.destination === "session") {
         sessionRegistry.set(tool.name, tool);
       }

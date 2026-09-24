@@ -80,6 +80,28 @@ describe("executeCommand", () => {
     expect(result.trim()).toBe("hello");
   });
 
+  it("fully redacts overlapping secrets regardless of order (longest-first)", async () => {
+    const result = await executeCommand("echo abcdef", {
+      cwd: process.cwd(),
+      redact: ["abc", "abcdef"],
+    });
+    expect(result).not.toContain("def");
+    expect(result).not.toContain("abcdef");
+    expect(result).toContain("[REDACTED]");
+  });
+
+  it("suppresses onUpdate entirely when an effective redact value is present", async () => {
+    const updates: string[] = [];
+    const result = await executeCommand("echo supersecret && sleep 0.15 && echo line2", {
+      cwd: process.cwd(),
+      redact: ["supersecret"],
+      onUpdate: (content) => updates.push(content),
+    });
+    expect(updates).toHaveLength(0);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("supersecret");
+  });
+
   it("calls onUpdate with progressive output", async () => {
     const updates: string[] = [];
     const result = await executeCommand("echo line1 && sleep 0.15 && echo line2", {
@@ -92,5 +114,33 @@ describe("executeCommand", () => {
     expect(updates.length).toBeGreaterThanOrEqual(1);
     // Final update should contain all output
     expect(updates[updates.length - 1]).toContain("line1");
+  });
+
+  describe("stdoutOnly", () => {
+    it("excludes stderr from the resolved value on success", async () => {
+      const result = await executeCommand("echo err-text >&2 && echo out-text", {
+        cwd: process.cwd(),
+        stdoutOnly: true,
+      });
+      expect(result).toContain("out-text");
+      expect(result).not.toContain("err-text");
+    });
+
+    it("preserves useful stderr context in the thrown error on failure", async () => {
+      await expect(
+        executeCommand("echo err-text >&2 && exit 1", {
+          cwd: process.cwd(),
+          stdoutOnly: true,
+        }),
+      ).rejects.toThrow(/err-text/);
+    });
+
+    it("does not affect default (combined) behavior when omitted", async () => {
+      const result = await executeCommand("echo err-text >&2 && echo out-text", {
+        cwd: process.cwd(),
+      });
+      expect(result).toContain("out-text");
+      expect(result).toContain("err-text");
+    });
   });
 });

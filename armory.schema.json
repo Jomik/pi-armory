@@ -16,6 +16,63 @@
     "disableBash": {
       "type": "boolean"
     },
+    "envSets": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A public literal value, used verbatim."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "env"
+                  ],
+                  "properties": {
+                    "env": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Name of a host environment variable to read."
+                    },
+                    "secret": {
+                      "type": "boolean",
+                      "description": "Redact the resolved value from all tool output."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "Resolves from the host process environment."
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "command"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Shell command whose trimmed stdout becomes the value."
+                    },
+                    "secret": {
+                      "type": "boolean",
+                      "description": "Redact the resolved value from all tool output."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "Resolves by running a shell command."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "description": "Named environment bindings available to tools in this config via envFrom."
+    },
     "tools": {
       "type": "array",
       "items": {
@@ -48,19 +105,60 @@
             "type": "object",
             "patternProperties": {
               "^.*$": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "A public literal value, used verbatim."
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "env"
+                    ],
+                    "properties": {
+                      "env": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Name of a host environment variable to read."
+                      },
+                      "secret": {
+                        "type": "boolean",
+                        "description": "Redact the resolved value from all tool output."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Resolves from the host process environment."
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "command"
+                    ],
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Shell command whose trimmed stdout becomes the value."
+                      },
+                      "secret": {
+                        "type": "boolean",
+                        "description": "Redact the resolved value from all tool output."
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Resolves by running a shell command."
+                  }
+                ]
               }
             },
-            "description": "Non-secret environment variables injected into the command. Values starting with $ resolve from the host environment (e.g. \"$SSH_AUTH_SOCK\"). Use $$ to escape a literal dollar sign. These values are NOT redacted from output."
+            "description": "Environment variables injected into the command. Each value is either a plain string (a public literal, used verbatim), { env: string, secret?: boolean } to read a host environment variable, or { command: string, secret?: boolean } to resolve the value by running a shell command and using its trimmed stdout. Set secret:true to redact the resolved value from all tool output."
           },
-          "secrets": {
-            "type": "object",
-            "patternProperties": {
-              "^.*$": {
-                "type": "string"
-              }
+          "envFrom": {
+            "type": "array",
+            "items": {
+              "type": "string"
             },
-            "description": "Secret environment variables stored in the macOS Keychain. Keys are env var names; values are keychain account names. Resolved values are redacted from all tool output."
+            "description": "Names of envSets in this config to use."
           },
           "when": {
             "anyOf": [
@@ -75,7 +173,8 @@
             ],
             "description": "Restricts the tool to sessions whose workspace matches this repository type. \"jj\" requires a Jujutsu repository; \"git\" requires a Git repository that is not also a Jujutsu repository. Omit to make the tool available in every workspace."
           }
-        }
+        },
+        "additionalProperties": false
       }
     }
   }

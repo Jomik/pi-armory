@@ -1,15 +1,19 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArmoryTool } from "../src/config.js";
 import {
+  getDestinationEnvSets,
   loadConfig,
   loadProjectToolNamesSync,
+  loadToolInDestination,
   loadToolWithSource,
   removeFromConfig,
   saveConfig,
+  validateEffectiveBindings,
 } from "../src/config.js";
+import { ArmoryConfigSchema } from "../src/schema.js";
 
 let tmpDir: string;
 let fakeHome: string;
@@ -118,7 +122,220 @@ describe("loadConfig", () => {
   });
 });
 
+describe("shared environment sets", () => {
+  const globalPath = () => path.join(fakeAgentDir, "armory.json");
+  const projectPath = () => path.join(projectRoot, ".pi", "armory.json");
+  const sets = {
+    common: { HOST: "public", TOKEN: { env: "TOKEN_SOURCE", secret: true } },
+    extra: { REGION: { command: "echo region" } },
+  };
+
+  it("associates each winning raw tool with only its defining destination's sets", async () => {
+    const globalTool = { ...toolA, envFrom: ["shared"] };
+    const projectTool = { ...toolAOverride, envFrom: ["shared"] };
+    const globalSets = { shared: { GLOBAL: "global" } };
+    const projectSets = { shared: { PROJECT: "project" } };
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      globalPath(),
+      JSON.stringify({ tools: [globalTool, { ...toolB, envFrom: ["shared"] }], envSets: globalSets }),
+    );
+    await mkdir(path.dirname(projectPath()), { recursive: true });
+    await writeFile(projectPath(), JSON.stringify({ tools: [projectTool], envSets: projectSets }));
+
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([projectTool, { ...toolB, envFrom: ["shared"] }]);
+    expect(result.envSetsByTool).toEqual({ "tool-a": projectSets, "tool-b": globalSets });
+    expect(result.tools[0].env).toBeUndefined();
+  });
+
+  it("loads mixed set and inline bindings without changing the tool definition or source precedence", async () => {
+    const globalTool = { ...toolA, envFrom: ["common", "extra"], env: { INLINE: "value" }, when: "git" } as ArmoryTool;
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify({ envSets: sets, tools: [globalTool, toolB] }));
+    await writeProject([toolAOverride]);
+    expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([toolAOverride, toolB]);
+    expect(await getDestinationEnvSets("global", projectRoot, fakeAgentDir)).toEqual(sets);
+    expect(await getDestinationEnvSets("project", projectRoot, fakeAgentDir)).toEqual({});
+    expect(validateEffectiveBindings(globalTool, sets)).toEqual({ ...sets.common, ...sets.extra, INLINE: "value" });
+    expect((await loadToolWithSource("tool-a", projectRoot, fakeAgentDir))?.tool).toEqual(toolAOverride);
+  });
+
+  it.each([
+    ["duplicate tool names", { tools: [toolA, toolA] }, "duplicate tool name"],
+    ["unknown set", { tools: [{ ...toolA, envFrom: ["missing"] }] }, "unknown envFrom"],
+    ["repeated set", { envSets: sets, tools: [{ ...toolA, envFrom: ["common", "common"] }] }, "repeated envFrom"],
+    [
+      "set overlap",
+      { envSets: { first: { KEY: "a" }, second: { KEY: "b" } }, tools: [{ ...toolA, envFrom: ["first", "second"] }] },
+      "duplicate environment",
+    ],
+    [
+      "inline overlap",
+      { envSets: sets, tools: [{ ...toolA, envFrom: ["common"], env: { HOST: "override" } }] },
+      "duplicate environment",
+    ],
+    [
+      "malformed set binding",
+      { envSets: { bad: { KEY: { env: "HOST", command: "echo" } } }, tools: [toolA] },
+      "invalid config",
+    ],
+  ])("rejects entire file for %s with a warning, leaving the other destination intact", async (_label, invalid, message) => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify(invalid));
+    await writeProject([toolB]);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([toolB]);
+      expect(loadProjectToolNamesSync(projectRoot)).toEqual(["tool-b"]);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining(message));
+      await expect(getDestinationEnvSets("global", projectRoot, fakeAgentDir)).rejects.toThrow("Invalid config");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("does not resolve a global set from a project tool, even if a global tool has the same name", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(globalPath(), JSON.stringify({ envSets: sets, tools: [{ ...toolA, envFrom: ["common"] }] }));
+    await mkdir(path.dirname(projectPath()), { recursive: true });
+    await writeFile(projectPath(), JSON.stringify({ tools: [{ ...toolAOverride, envFrom: ["common"] }] }));
+    expect((await loadConfig(projectRoot, fakeAgentDir)).tools).toEqual([{ ...toolA, envFrom: ["common"] }]);
+    expect(loadProjectToolNamesSync(projectRoot)).toEqual([]);
+  });
+
+  it("refuses malformed and semantic-invalid files or tool updates without modifying them", async () => {
+    for (const contents of ["{broken", JSON.stringify({ tools: [toolA, toolA] })]) {
+      await mkdir(path.dirname(projectPath()), { recursive: true });
+      await writeFile(projectPath(), contents);
+      await expect(saveConfig(toolB, "project", projectRoot, fakeAgentDir)).rejects.toThrow("Invalid config");
+      expect(await readFile(projectPath(), "utf-8")).toBe(contents);
+    }
+    const original = JSON.stringify({ tools: [toolA], envSets: sets });
+    await writeFile(projectPath(), original);
+    for (const invalid of [
+      { ...toolB, envFrom: ["unknown"] },
+      { ...toolB, envFrom: ["common", "common"] },
+      { ...toolB, envFrom: ["common"], env: { HOST: "collision" } },
+      { ...toolB, when: "svn" },
+      { ...toolB, secrets: { KEY: "legacy" } },
+    ]) {
+      await expect(saveConfig(invalid as ArmoryTool, "project", projectRoot, fakeAgentDir)).rejects.toThrow();
+      expect(await readFile(projectPath(), "utf-8")).toBe(original);
+    }
+    await saveConfig(
+      { ...toolB, envFrom: ["common", "extra"], env: { INLINE: "ok" } },
+      "project",
+      projectRoot,
+      fakeAgentDir,
+    );
+    expect(JSON.parse(await readFile(projectPath(), "utf-8"))).toEqual({
+      tools: [toolA, { ...toolB, envFrom: ["common", "extra"], env: { INLINE: "ok" } }],
+      envSets: sets,
+    });
+  });
+
+  it("does not create a destination file for an invalid tool", async () => {
+    const projectPath = path.join(projectRoot, ".pi", "armory.json");
+    await expect(saveConfig({ ...toolA, envFrom: ["missing"] }, "project", projectRoot, fakeAgentDir)).rejects.toThrow(
+      "unknown envFrom",
+    );
+    await expect(readFile(projectPath, "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps the shipped JSON schema in sync with TypeBox", async () => {
+    const shipped = JSON.parse(await readFile(new URL("../armory.schema.json", import.meta.url), "utf-8"));
+    expect(shipped).toEqual(
+      JSON.parse(
+        JSON.stringify({
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          $id: "https://raw.githubusercontent.com/Jomik/pi-armory/main/armory.schema.json",
+          title: "Armory Config",
+          ...ArmoryConfigSchema,
+        }),
+      ),
+    );
+  });
+});
+
 describe("saveConfig", () => {
+  it("rejects a create-only collision without changing the destination bytes", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools: [toolA, toolB], draftModel: "fast-model" });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(saveConfig(toolAOverride, "project", projectRoot, fakeAgentDir, undefined, true)).rejects.toThrow(
+      "tool-a",
+    );
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("creates an absent tool in create-only mode", async () => {
+    await writeProject([toolB]);
+    await saveConfig(toolA, "project", projectRoot, fakeAgentDir, undefined, true);
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    expect(JSON.parse(content)).toEqual({ tools: [toolB, toolA] });
+  });
+
+  it("allows unchanged selected sets despite key order or unrelated set changes and returns the destination sets", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const expected = {
+      selected: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" },
+      unrelated: { OLD: "old" },
+    };
+    const destinationSets = {
+      unrelated: { NEW: "new" },
+      selected: { HOST: "public", TOKEN: { secret: true, env: "TOKEN_SOURCE" } },
+    };
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, JSON.stringify({ tools: [], envSets: destinationSets }));
+
+    const result = await saveConfig(
+      { ...toolA, envFrom: ["selected"] },
+      "project",
+      projectRoot,
+      fakeAgentDir,
+      expected,
+    );
+
+    expect(result).toEqual(destinationSets);
+    expect(JSON.parse(await readFile(filePath, "utf-8"))).toEqual({
+      tools: [{ ...toolA, envFrom: ["selected"] }],
+      envSets: destinationSets,
+    });
+  });
+
+  it.each([
+    ["secret flag", { selected: { TOKEN: { env: "TOKEN_SOURCE", secret: false }, HOST: "public" } }],
+    ["resolver", { selected: { TOKEN: { command: "get-token", secret: true }, HOST: "public" } }],
+    ["variable names", { selected: { RENAMED: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } }],
+    ["missing name", { other: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } }],
+  ])("rejects a changed selected set (%s) without writing", async (_case, destinationSets) => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const expected = { selected: { TOKEN: { env: "TOKEN_SOURCE", secret: true }, HOST: "public" } };
+    const original = `${JSON.stringify({ tools: [toolB], envSets: destinationSets }, null, 2)}\n`;
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(
+      saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, expected),
+    ).rejects.toThrow("Selected env set changed; reload before saving");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("rejects when the expected snapshot lacks a selected name", async () => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools: [], envSets: { selected: { KEY: "value" } } });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(
+      saveConfig({ ...toolA, envFrom: ["selected"] }, "project", projectRoot, fakeAgentDir, {}),
+    ).rejects.toThrow("Selected env set changed; reload before saving");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
   it("creates project file if it does not exist", async () => {
     await saveConfig(toolA, "project", projectRoot, fakeAgentDir);
     const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
@@ -205,7 +422,71 @@ describe("loadToolWithSource", () => {
   });
 });
 
+describe("loadToolInDestination", () => {
+  it("reads only the selected scope even when project overrides global", async () => {
+    await writeGlobal([toolA, toolB]);
+    await writeProject([toolAOverride]);
+    expect(await loadToolInDestination("tool-a", "global", projectRoot, fakeAgentDir)).toEqual(toolA);
+    expect(await loadToolInDestination("tool-a", "project", projectRoot, fakeAgentDir)).toEqual(toolAOverride);
+    expect(await loadToolInDestination("tool-b", "project", projectRoot, fakeAgentDir)).toBeNull();
+  });
+
+  it.each(["project", "global"] as const)("returns null for missing %s file or tool", async (destination) => {
+    expect(await loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).toBeNull();
+    if (destination === "project") await writeProject([toolB]);
+    else await writeGlobal([toolB]);
+    expect(await loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).toBeNull();
+  });
+
+  it.each([
+    "project",
+    "global",
+  ] as const)("throws for invalid %s config instead of falling back", async (destination) => {
+    if (destination === "project") {
+      await writeGlobal([toolA]);
+    } else {
+      await writeProject([toolAOverride]);
+    }
+    const filePath =
+      destination === "project" ? path.join(projectRoot, ".pi", "armory.json") : path.join(fakeAgentDir, "armory.json");
+    await mkdir(path.dirname(filePath), { recursive: true });
+    for (const content of ["{bad json", JSON.stringify({ tools: [toolA, toolA] })]) {
+      await writeFile(filePath, content);
+      await expect(loadToolInDestination("tool-a", destination, projectRoot, fakeAgentDir)).rejects.toThrow(
+        "Invalid config",
+      );
+    }
+  });
+});
+
 describe("removeFromConfig", () => {
+  it.each([
+    ["changed", [toolAOverride, toolB]],
+    ["missing", [toolB]],
+  ])("rejects a %s guarded tool without changing the destination bytes", async (_case, tools) => {
+    const filePath = path.join(projectRoot, ".pi", "armory.json");
+    const original = JSON.stringify({ tools, draftModel: "fast-model" });
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, original);
+
+    await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, toolA)).rejects.toThrow("tool-a");
+    expect(await readFile(filePath, "utf-8")).toBe(original);
+  });
+
+  it("rejects a guarded removal when the destination file is missing", async () => {
+    await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, toolA)).rejects.toThrow("tool-a");
+    await expect(readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("removes a matching guarded tool while preserving other tools", async () => {
+    await writeProject([toolA, toolB]);
+    await removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir, { ...toolA });
+    const content = await readFile(path.join(projectRoot, ".pi", "armory.json"), "utf-8");
+    expect(JSON.parse(content)).toEqual({ tools: [toolB] });
+  });
+
   it("does nothing if the config file does not exist (ENOENT)", async () => {
     // Neither project nor global file exists — should not throw
     await expect(removeFromConfig("tool-a", "project", projectRoot, fakeAgentDir)).resolves.toBeUndefined();
@@ -305,15 +586,28 @@ describe("schema validation", () => {
     expect(result.tools).toEqual([]);
   });
 
-  it("ignores unknown tool keys", async () => {
+  it("rejects unknown tool keys", async () => {
     await mkdir(fakeAgentDir, { recursive: true });
     await writeFile(
       path.join(fakeAgentDir, "armory.json"),
       JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", extra: true }] }, null, 2),
     );
     const result = await loadConfig(projectRoot, fakeAgentDir);
-    expect(result.tools).toHaveLength(1);
-    expect(result.tools[0].name).toBe("t");
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects a tool with a legacy 'secrets' field", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        { tools: [{ name: "t", command: "echo", description: "d", secrets: { TOKEN: "legacy-value" } }] },
+        null,
+        2,
+      ),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
   });
 
   it("rejects tool with wrong field type", async () => {
@@ -340,7 +634,11 @@ describe("schema validation", () => {
       description: "Full tool",
       requires_approval: true,
       guidelines: ["Be careful"],
-      secrets: { API_KEY: "keychain:api-key" },
+      env: {
+        PUBLIC: "literal-value",
+        HOST: { env: "SOME_HOST_VAR" },
+        SECRET: { command: "print-secret", secret: true },
+      },
     };
     await writeGlobal([tool as ArmoryTool]);
     const result = await loadConfig(projectRoot, fakeAgentDir);
@@ -366,6 +664,52 @@ describe("schema validation", () => {
     await writeFile(
       path.join(fakeAgentDir, "armory.json"),
       JSON.stringify({ tools: [{ name: "t", command: "echo", description: "d", when: "svn" }] }, null, 2),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects an env binding object with both env and command keys", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        {
+          tools: [
+            {
+              name: "t",
+              command: "echo",
+              description: "d",
+              env: { TOKEN: { env: "FOO", command: "echo hi" } },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    const result = await loadConfig(projectRoot, fakeAgentDir);
+    expect(result.tools).toEqual([]);
+  });
+
+  it("rejects an env binding object with an unknown key", async () => {
+    await mkdir(fakeAgentDir, { recursive: true });
+    await writeFile(
+      path.join(fakeAgentDir, "armory.json"),
+      JSON.stringify(
+        {
+          tools: [
+            {
+              name: "t",
+              command: "echo",
+              description: "d",
+              env: { TOKEN: { env: "FOO", extra: true } },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
     );
     const result = await loadConfig(projectRoot, fakeAgentDir);
     expect(result.tools).toEqual([]);

@@ -14,7 +14,6 @@ vi.mock("../src/register-tool.js", async (importOriginal) => {
 vi.mock("../src/request-tool.js");
 vi.mock("../src/commands.js");
 vi.mock("../src/executor.js");
-vi.mock("../src/keychain.js");
 vi.mock("../src/repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/repository.js")>();
   return {
@@ -70,8 +69,27 @@ describe("factory", () => {
     await factory(fakePi);
 
     expect(registerArmoryTool).toHaveBeenCalledTimes(2);
-    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, toolA);
-    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, toolB);
+    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, toolA, undefined);
+    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, toolB, undefined);
+  });
+
+  it("passes only each winner's sets into registration, without expanding the raw tools", async () => {
+    const global = { ...toolB, envFrom: ["shared"] };
+    const project = { ...toolA, envFrom: ["shared"] };
+    const globalSets = { shared: { GLOBAL: "global" } };
+    const projectSets = { shared: { PROJECT: "project" } };
+    vi.mocked(loadConfig).mockResolvedValue({
+      tools: [project, global],
+      envSetsByTool: { "tool-a": projectSets, "tool-b": globalSets },
+      disableBash: true,
+    });
+
+    await factory(fakePi);
+
+    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, project, projectSets);
+    expect(registerArmoryTool).toHaveBeenCalledWith(fakePi, global, globalSets);
+    expect(toolRegistry.get("tool-a")).toBe(project);
+    expect(toolRegistry.get("tool-b")).toBe(global);
   });
 
   it("registers request_tool with pi, projectRoot, and draftModel", async () => {
@@ -158,6 +176,29 @@ describe("factory", () => {
       await handler({}, { cwd: "/tmp/proj" });
 
       expect(fakePiWithTool.setActiveTools).toHaveBeenCalledWith(["bash", "read", "write", "edit", "tool-a"]);
+    });
+
+    it("leaves a mismatched set-backed tool inactive without resolving its bindings", async () => {
+      const conditional = { ...gitTool, envFrom: ["shared"] };
+      vi.mocked(loadConfig).mockResolvedValue({
+        tools: [conditional],
+        envSetsByTool: { "git-tool": { shared: { TOKEN: { command: "resolve-token", secret: true } } } },
+        disableBash: false,
+      });
+      vi.mocked(detectRepositoryType).mockReturnValue("jj");
+      const pi = {
+        ...fakePi,
+        getActiveTools: () => ["git-tool"],
+        setActiveTools: vi.fn(),
+      } as unknown as Parameters<typeof factory>[0];
+      await factory(pi);
+      // biome-ignore lint/suspicious/noExplicitAny: test helper extracting handler from mock calls
+      const handler = (pi.on as any).mock.calls.find(([event]: [string]) => event === "session_start")?.[1];
+      await handler({}, { cwd: "/tmp/proj" });
+      expect(pi.setActiveTools).toHaveBeenCalledWith([]);
+      expect(registerArmoryTool).toHaveBeenCalledWith(pi, conditional, {
+        shared: { TOKEN: { command: "resolve-token", secret: true } },
+      });
     });
 
     it("removes a git-conditional tool when the workspace is a jj repository", async () => {

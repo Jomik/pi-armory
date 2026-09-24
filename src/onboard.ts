@@ -2,7 +2,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { saveConfig } from "./config.js";
+import type { EnvSets } from "./config.js";
+import { getDestinationEnvSets, saveConfig } from "./config.js";
 import type { CandidateRequest, DraftAuth, DraftInput, DraftOutput } from "./draft.js";
 import { draftToolDefinition, generateCandidateRequests } from "./draft.js";
 import { registerArmoryTool, sessionRegistry } from "./register-tool.js";
@@ -215,6 +216,13 @@ async function processCandidate(
     return "skipped";
   }
 
+  // Load both destinations independently so an unavailable scope cannot block the other.
+  const [projectSets, globalSets] = await Promise.all([
+    getDestinationEnvSets("project", projectRoot).catch(() => ({})),
+    getDestinationEnvSets("global", projectRoot).catch(() => ({})),
+  ]);
+  const envSets = { project: projectSets, global: globalSets };
+
   // Show tool editor — same as request_tool
   const result = await showToolEditor(
     ctx,
@@ -227,6 +235,7 @@ async function processCandidate(
       requiresApproval: drafted.requires_approval,
       destination: drafted.destination,
       when: drafted.when,
+      envSets,
     },
     draftModelName,
     draftInput,
@@ -250,14 +259,31 @@ async function processCandidate(
     return "skipped";
   }
 
-  const tool = buildToolFromResult({ ...result, name });
-
-  // Save and register — identical logic to request_tool
-  if (result.destination !== "session") {
-    await saveConfig(tool, result.destination, projectRoot);
-    sessionRegistry.delete(tool.name);
+  if (sessionRegistry.has(name)) {
+    ctx.ui.notify(`Skipped '${candidate.label}': tool name already used by a session tool`, "info");
+    return "skipped";
   }
-  registerArmoryTool(pi, tool);
+
+  const tool = buildToolFromResult({
+    ...result,
+    name,
+    ...(result.destination === "session" ? { envFrom: [] } : {}),
+  });
+
+  // Save before changing the registry; a failed save skips only this candidate.
+  if (result.destination === "session") {
+    registerArmoryTool(pi, tool);
+  } else {
+    let savedSets: EnvSets;
+    try {
+      savedSets = await saveConfig(tool, result.destination, projectRoot, undefined, envSets[result.destination], true);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") throw err;
+      ctx.ui.notify(`Skipped '${candidate.label}': save failed`, "info");
+      return "skipped";
+    }
+    registerArmoryTool(pi, tool, savedSets);
+  }
   if (result.destination === "session") {
     sessionRegistry.set(tool.name, tool);
   }

@@ -40,7 +40,8 @@ Tools are defined in `.pi/armory.json` (project-local) or `~/.pi/agent/armory.js
 
 Top-level config fields:
 
-- `tools`: command tool definitions.
+- `tools`: array of command tool definitions; names must be unique within each file.
+- `envSets`: optional map of set names to maps of environment variable bindings, selected by tools in the same file.
 - `draftModel`: optional `"provider:modelId"` used to draft/re-draft tool definitions. Project config overrides global config.
 - `disableBash`: optional global-config boolean; defaults to `true`. Set `false` in `~/.pi/agent/armory.json` to keep pi's built-in `bash` tool active. Project-local `disableBash` is ignored.
 
@@ -68,6 +69,8 @@ Parameters are declared via template syntax in the command string:
 - `{{name?}}` - optional string (omitted when not provided)
 - `{{...name}}` - required variadic (expands to multiple shell-escaped args)
 - `{{...name?}}` - optional variadic
+- `{{--verbose}}` / `{{-v}}` - required boolean flag; `{{--verbose?}}` / `{{-v?}}` - optional boolean flag. `true` emits the flag, `false` omits it; an omitted optional value also emits nothing.
+- `{{--message text}}` / `{{-m text}}` - required value flag; `{{--message text?}}` / `{{-m text?}}` - optional value flag. A provided value expands to the flag, a space, and the shell-escaped value (e.g. `--message 'hello world'`); an omitted optional value emits nothing.
 
 ```json
 {
@@ -115,6 +118,8 @@ Agent calls: request_tool({
 
 When no draft model is configured, or when the draft does not choose a destination, the destination falls back to **Session**. This keeps the armory clean: tools are only persisted when you explicitly promote them.
 
+The form's **Env sets** multi-select lists only set names for the chosen Project or Global destination, not definitions, values, or resolver commands. Only the human selects sets; re-drafting leaves selections unchanged. Session tools cannot use sets. Switching destinations keeps selections, but a missing set or a same-name set with a different definition is marked unresolved until deselected and reselected in the new destination. Approval requires resolving these selections; saving also rejects stale or missing sets and duplicate environment keys before writing.
+
 If the draft model determines it lacks sufficient context (e.g., command references a script whose contents weren't provided), it rejects the request with a reason. The agent receives the rejection message and can retry with additional context.
 
 Tool names are automatically normalized: lowercased, spaces/dashes collapsed to underscores, and any character that isn't a lowercase letter, digit, or underscore is stripped. The normalized name must start with a letter (leading digits/underscores are stripped). `request_tool` is a reserved name and cannot be used for a registered tool.
@@ -133,45 +138,48 @@ Edits are schema-validated; once valid, the view returns to the approval panel b
 
 ### Environment variables
 
-Tools can inject environment variables into their subprocess via the `env` field:
+Tools can inject environment variables into their subprocess via an inline `env` map and/or named sets. Top-level `envSets` defines reusable binding maps; a tool's `envFrom` array explicitly selects sets from its own config file. Sets are never injected implicitly or inherited across project/global files, even when names match. Selected sets and inline `env` can be combined only when their environment variable keys do not overlap; repeated set names and missing sets are invalid. There is no separate `secrets` field. Each value is a binding:
+
+- A plain string — a **public literal**, used verbatim.
+- `{ "env": "HOST_NAME", "secret"?: boolean }` — reads a host environment variable.
+- `{ "command": "...", "secret"?: boolean }` — runs a shell command and uses its trimmed stdout.
 
 ```json
 {
-  "name": "deploy",
-  "command": "./deploy.sh {{target}}",
-  "description": "Deploy to target environment",
-  "env": {
-    "SERVER_URL": "https://deploy.example.com",
-    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK"
-  }
+  "envSets": {
+    "deploy_target": {
+      "SERVER_URL": "https://deploy.example.com",
+      "REGION": { "env": "DEPLOY_REGION" }
+    },
+    "deploy_auth": {
+      "GITHUB_TOKEN": { "command": "gh auth token", "secret": true }
+    }
+  },
+  "tools": [
+    {
+      "name": "deploy",
+      "command": "./deploy.sh {{target}}",
+      "description": "Deploy to target environment",
+      "envFrom": ["deploy_target", "deploy_auth"],
+      "env": { "DEPLOY_MODE": "staging" }
+    }
+  ]
 }
 ```
 
-Values support three forms:
-- **Static** - `"https://..."` passed as-is
-- **Reference** - `"$VAR"` resolved from the host process environment at execution time; throws if not set
-- **Escaped** - `"$$literal"` becomes `"$literal"` (use `$$` to escape a leading dollar sign)
+Set `secret: true` on an `env`/`command` binding (not available on literals) to redact its resolved value — whenever nonempty — from the main command's output. Whenever any binding's resolved secret value is nonempty, streaming updates are suppressed entirely for that invocation (to avoid leaking a secret split across chunk boundaries); the caller only receives the final, fully redacted success or error output.
 
-> **⚠️ `env` values are visible in tool output shown to the LLM.** Do not put secrets here. Use the `secrets` field for sensitive values - those are stored in the macOS Keychain and redacted from all output.
+Selected set and inline bindings resolve once per invocation, before the main command, in the tool's working directory, sharing its cancellation signal. `{ command }` bindings use trimmed stdout only (stderr is excluded on success). Each binding resolves independently — none can see values from other bindings.
 
-Secrets and `/armory secrets` are macOS-only: storage uses the macOS Keychain (`security`) and the set/update prompt uses a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop session able to display dialogs). There is no cross-platform fallback; on other platforms or headless/non-GUI sessions, secrets management is unavailable.
+If a host env var is missing, a resolver command fails, or a resolver's stdout is empty/whitespace-only, the main command does not run. Generic failure suppression for `secret: true` bindings applies specifically to a failing `{ command }` resolver: the error is reported without leaking resolver output or diagnostics. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Failures on non-secret bindings keep their full diagnostic detail.
 
-When both `env` and `secrets` define the same key, secrets take precedence and the env entry is skipped.
+Legacy `secrets` fields make a config file invalid; old `$VAR` and `$$` strings are now literal values, not substitution syntax. Migrate existing project and global configs manually to `env`/`envSets` bindings; there is no automatic migration. An invalid config file is ignored in full with a warning, and saves refuse to overwrite it.
 
-#### Managing secrets
-
-`/armory secrets` walks a native select-menu flow to manage Keychain-backed secrets:
-
-1. An account list menu shows each configured secret account and whether it's currently found in the Keychain.
-2. Selecting an account opens a status/action menu (`Set/update`, `Delete` if present, `Back`).
-3. **Set/update** collects the value via a local macOS `osascript` hidden-answer dialog (a native system dialog, not a Pi dialog) - the value never traverses the Pi/Paseo UI or transcript, only the resulting save/failure notification is. However, the value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may be visible to local process inspection (e.g. `ps`) for the brief duration of that call.
-4. **Delete** requires a native confirm/cancel selection before removing the entry.
-
-Storage (macOS Keychain, service `pi-armory`) and output redaction are unchanged by the UI used to manage entries.
+> **No built-in secret store.** Armory has no secrets store and no `/armory secrets` UI. Use a `command` binding that calls your credential's own provider or CLI — e.g. `gh auth token` for the GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored yourself in the macOS Keychain. You manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
 ### Output
 
-Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included.
+Command output (stdout + stderr merged) is streamed to the agent. Non-zero exit codes are reported as tool failures with the full output included. If any `secret: true` binding resolved to a nonempty value, streaming is suppressed for the invocation and only the final redacted output is returned.
 
 ## Extension interoperability
 
@@ -211,6 +219,8 @@ If you change the **Destination** field, a confirmation is shown before the chan
 Renaming a tool during edit uses the same normalization, validation, and reserved-name rules as `request_tool`: the name is lowercased and normalized, must contain at least one letter, and cannot be `request_tool`. If the result is invalid or reserved, a notification explains why and the edit aborts with no config or registry changes.
 
 Cancelling the confirmation aborts the edit — no config or registry is modified.
+
+Editing preserves existing `envFrom` selections unless you clear or change them explicitly in the form. Moving a set-backed tool to another scope requires selecting compatible sets there; to move it to Session, explicitly deselect all sets in the form. The form blocks approval until selections are resolved, and saving refuses unresolved or stale sets. Creating or moving a tool rejects same-scope or session-name collisions rather than silently overwriting another tool. The form selects existing sets only; it does not edit set definitions or group tools.
 
 When editing, AI re-draft can be invoked from the Re-draft field. If the draft model returns nothing (unavailable), a `Re-draft unavailable` notification is shown; if re-drafting throws, a `Re-draft failed` notification is shown. Either way, the form returns to the review menu with the current state unchanged.
 
