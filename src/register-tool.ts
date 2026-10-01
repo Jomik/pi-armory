@@ -3,9 +3,8 @@ import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { type TObject, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import type { ArmoryTool } from "./config.js";
+import { type ArmoryTool, type EnvBinding, type EnvSets, validateEffectiveBindings } from "./config.js";
 import { executeCommand } from "./executor.js";
-import { fetchSecret } from "./keychain.js";
 import { FLAG_PLACEHOLDER_RE, formatParamValue, parsePlaceholders } from "./shared.js";
 
 function shellEscape(value: string): string {
@@ -129,57 +128,77 @@ export function buildParamSchema(tool: ArmoryTool): TObject {
 }
 
 /**
- * Resolves a single env value: $$ escape, $VAR reference, or static string.
+ * Resolves a single binding value into its concrete string value, plus whether it
+ * should be redacted from tool output.
+ *
+ * - A plain string is a public literal, used verbatim.
+ * - `{ env }` reads a host environment variable.
+ * - `{ command }` runs a shell command (via the tool's cwd/signal, no streaming) and
+ *   uses its trimmed stdout only — stderr is captured for failure context but never
+ *   contaminates the resolved value.
+ *
+ * Resolver commands are independent: they never see previously resolved bindings.
  */
-function resolveEnvValue(envVar: string, value: string): string {
-  if (value.startsWith("$$")) {
-    return value.slice(1);
+async function resolveBinding(
+  envVar: string,
+  binding: EnvBinding,
+  ctx: { cwd: string; signal?: AbortSignal },
+): Promise<{ value: string; secret: boolean }> {
+  if (typeof binding === "string") {
+    return { value: binding, secret: false };
   }
-  if (value.startsWith("$")) {
-    const refName = value.slice(1);
-    const resolved = process.env[refName];
+
+  if ("env" in binding) {
+    const resolved = process.env[binding.env];
     if (resolved == null) {
       throw new Error(
-        `Environment variable '${refName}' (referenced by env.${envVar}) is not set. ` +
-          `Set it in your shell before launching pi, or use a static value in armory.json.`,
+        `Environment variable '${binding.env}' (referenced by env.${envVar}) is not set. ` +
+          `Set it in your shell before launching pi, or use a literal value in armory.json.`,
       );
     }
-    return resolved;
+    return { value: resolved, secret: binding.secret === true };
   }
-  return value;
+
+  // { command }
+  let output: string;
+  try {
+    output = await executeCommand(binding.command, { cwd: ctx.cwd, signal: ctx.signal, stdoutOnly: true });
+  } catch (err) {
+    if (binding.secret) {
+      throw new Error(`Failed to resolve secret environment binding 'env.${envVar}'.`);
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to resolve environment binding 'env.${envVar}': ${msg}`);
+  }
+  const trimmed = output.trim();
+  if (!trimmed) {
+    throw new Error(`Resolver command for env.${envVar} produced no output.`);
+  }
+  return { value: trimmed, secret: binding.secret === true };
 }
 
 /**
- * Resolves the env and secrets for a tool into extraEnv and redact arrays.
- * Keys defined in both env and secrets are skipped in env (secrets win).
+ * Resolves all env bindings for a tool into extraEnv and redact arrays.
  */
 async function resolveToolEnvironment(
   tool: ArmoryTool,
+  envSets: EnvSets,
+  ctx: { cwd: string; signal?: AbortSignal },
 ): Promise<{ extraEnv?: Record<string, string>; redact?: string[] }> {
-  const secretKeys = new Set(tool.secrets ? Object.keys(tool.secrets) : []);
+  const bindings = validateEffectiveBindings(tool, envSets);
+  const extraEnv: Record<string, string> = {};
+  const redact: string[] = [];
 
-  // Resolve env (static values, $VAR references, $$ escape)
-  let extraEnv: Record<string, string> | undefined;
-  if (tool.env && Object.keys(tool.env).length > 0) {
-    extraEnv = {};
-    for (const [envVar, value] of Object.entries(tool.env)) {
-      if (secretKeys.has(envVar)) continue;
-      extraEnv[envVar] = resolveEnvValue(envVar, value);
-    }
-    if (Object.keys(extraEnv).length === 0) extraEnv = undefined;
+  for (const [envVar, binding] of Object.entries(bindings)) {
+    const { value, secret } = await resolveBinding(envVar, binding, ctx);
+    extraEnv[envVar] = value;
+    if (secret) redact.push(value);
   }
 
-  // Fetch secrets from keychain
-  let redact: string[] | undefined;
-  if (tool.secrets && Object.keys(tool.secrets).length > 0) {
-    const entries = Object.entries(tool.secrets);
-    const values = await Promise.all(entries.map(([, account]) => fetchSecret(account)));
-    const secretEnv = Object.fromEntries(entries.map(([envVar], i) => [envVar, values[i] as string]));
-    extraEnv = { ...extraEnv, ...secretEnv };
-    redact = values;
-  }
-
-  return { extraEnv, redact };
+  return {
+    extraEnv: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
+    redact: redact.length > 0 ? redact : undefined,
+  };
 }
 
 /**
@@ -212,7 +231,7 @@ export const sessionRegistry = new Map<string, ArmoryTool>();
  */
 export const toolRegistry = new Map<string, ArmoryTool>();
 
-export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
+export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool, envSets: EnvSets = {}) {
   toolRegistry.set(tool.name, tool);
   if (tool.requires_approval) {
     approvalRegistry.set(tool.name, tool);
@@ -302,7 +321,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool) {
       }
 
       const command = interpolateCommand(tool.command, validated.value);
-      const { extraEnv, redact } = await resolveToolEnvironment(tool);
+      const { extraEnv, redact } = await resolveToolEnvironment(tool, envSets, { cwd: ctx.cwd, signal });
 
       const output = await executeCommand(command, {
         cwd: ctx.cwd,

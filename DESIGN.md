@@ -66,6 +66,8 @@ The condition set is intentionally closed. Arbitrary shell predicates, named con
 
 ## Tool shape
 
+Tools remain an array; tool names must be unique within each config file. A tool may specify an explicit `envFrom` list of named sets alongside its inline `env` bindings. No sets are injected implicitly. Tool grouping is outside this design.
+
 ```json
 {
   "tools": [
@@ -117,6 +119,8 @@ Defaults and safety policy for candidates are advisory only; final control remai
 
 - Global (`~/.pi/agent/armory.json`) and project (`.pi/armory.json`) configs are additive
 - Project tools override global tools with the same name
+- `envSets` are scoped to their defining config: global tools may use only global sets, project tools only project sets, and session tools cannot reference `envSets`. Sets do not merge across files, even when a project tool overrides a global tool.
+- Unknown or repeated names in a tool's `envFrom`, duplicate tool names within one file, and duplicate env variable keys across selected sets and inline `env` invalidate the entire defining config with a warning, consistent with existing all-or-nothing config loading; none are silently shadowed.
 - `draftModel` follows the same override: project value wins over global
 - If no config exists, no tools are registered — but `request_tool` is always available so the agent can bootstrap
 
@@ -213,7 +217,15 @@ This approach prevents injection by containing every value in single quotes rega
 
 ## Environment variables
 
-Tools can declare non-secret environment variables via `env: Record<string, string>`. Keys are env var names injected into the subprocess; values are either static strings or `$VAR` references.
+Tools can declare an `env: Record<string, EnvBinding>` map. Keys are env var names injected into the subprocess. A config may also define top-level `envSets`, a map from set names to maps of env variable names using the same binding forms. A tool opts into sets by listing their names in `envFrom`; inline `env` remains available. For example, an `atlassian` set can contain a public server name and a secret token resolver; each Jira or Confluence tool that needs them lists `atlassian` in its `envFrom`. There is no separate `secrets` field; source-object bindings can be marked secret, while literal strings are always public.
+
+A binding is one of:
+
+- A plain string — a **public literal**, injected verbatim (never redacted).
+- `{ "env": "HOST_NAME", "secret"?: boolean }` — reads `process.env[HOST_NAME]` at execution time.
+- `{ "command": "...", "secret"?: boolean }` — runs a shell command and uses its trimmed stdout as the value.
+
+`secret: true` is only meaningful on the `env`/`command` source-object forms (literals are always public). When set, the resolved value is redacted from the main tool command's output whenever it is nonempty. Whenever any binding's resolved secret value is nonempty, streaming updates for that invocation are suppressed entirely — to prevent a secret from being disclosed across chunk boundaries — and the caller receives only the final, fully redacted success or error output.
 
 ```json
 {
@@ -222,39 +234,36 @@ Tools can declare non-secret environment variables via `env: Record<string, stri
   "description": "Deploy",
   "env": {
     "SERVER_URL": "https://deploy.example.com",
-    "SSH_AUTH_SOCK": "$SSH_AUTH_SOCK",
-    "PRICE": "$$9.99"
+    "GITHUB_TOKEN": { "command": "gh auth token", "secret": true },
+    "API_TOKEN": {
+      "command": "security find-generic-password -s pi-armory -a api-token -w",
+      "secret": true
+    }
   }
 }
 ```
 
-### Value resolution
+### Resolution
 
-- Static string (no `$` prefix): injected verbatim
-- `$NAME`: resolved from `process.env[NAME]` at execution time; throws if not set
-- `$$...`: escaped literal — leading `$$` becomes `$` (use for values that start with a dollar sign)
+The effective bindings from selected sets and inline `env` are assembled and resolved only for an invocation, under the same redaction and resolver rules. `when` is orthogonal: inactive conditional tools do not resolve env bindings.
 
-### Visibility
+- Bindings are resolved once per invocation, before the main command runs, in the tool's `cwd`, using the same cancellation signal as the main command.
+- `{ command }` bindings use trimmed stdout only — stderr is excluded from a successful resolution (it may still appear in error diagnostics on failure).
+- Bindings are resolved independently: a resolver command does not receive values produced by other bindings, and bindings cannot reference each other.
+- Resolution failures prevent the main command from running: a missing host env var, a resolver command that fails, or a resolver whose stdout is empty or all-whitespace all abort execution before the main command starts.
+- Generic failure suppression only applies to a failing `{ command }` resolver marked `secret: true`: the reported error is generic (it names the binding, not the underlying command output or exit details) so resolver output and diagnostics are never leaked. A missing `{ env }` source still reports the configured host variable name, since no secret value was ever resolved. Non-secret binding failures retain full diagnostics (the resolver's error message/output) to aid debugging.
 
-**`env` values are NOT redacted from tool output.** If a resolved value appears in the subprocess's stdout/stderr, it will be visible to the LLM. Do not use `env` for credentials or tokens — use `secrets` instead.
+The shared tool review/edit form used by `request_tool`, `/armory edit`, and onboarding offers a multi-select **Env sets** field for `envFrom`. It lists only set names defined in the currently selected project or global destination config; session tools cannot select sets. The selector never displays or resolves binding values or resolver commands. It is available when creating or editing a tool, with an existing tool's selections preserved on opening the form and across AI re-drafts. Drafts and re-drafts cannot select or change sets; only the human can do so in the form. Inline `env` is preserved by the form but can only be hand-edited in config JSON; there is no in-form JSON editor. Set definitions are also managed in config JSON, not in the form.
 
-### Interaction with secrets
+Changing destination does not silently rebind a selected name to different bindings or drop selections. Selections incompatible with the destination remain in the same selector list, marked `(unresolved)`, until the user explicitly deselects them (and, if desired, selects the destination's set anew); save is refused with a clear message while any remain. This includes a same-named set whose destination definition differs in environment variable names or structurally in binding definitions, including resolver sources and `secret` flags (object key order does not matter). A move to session requires the user to clear all selected sets in the form before saving; unresolved selections block saving there too. Before writing, save validates selected names and their definitions against the current destination config and rejects duplicate env variable keys across selected sets or inline `env`. Only an explicit new selection can bind a tool to a different definition under the same name. On failed validation, neither config nor the session changes.
 
-When both `env` and `secrets` define the same key:
-- The `env` entry is skipped entirely (no resolution, no error if `$VAR` is unset)
-- The `secrets` value wins and is redacted from output
+Env sets do not nest, refer to other sets, apply to every tool automatically, or have their own `when` conditions. Organizing tools into groups is outside scope.
 
-This allows a tool to declare a fallback in `env` that a user can override with a secret without breaking the config.
+Legacy `secrets` invalidates the entire config; old `$VAR`/`$$` strings are used verbatim as public literals, not expanded. Both project and global configs must be migrated manually to the binding forms above; there is no automatic migration.
 
-## Secrets
+### Credentials are provider-managed
 
-Tools can reference secrets via `secrets: Record<string, string>` where keys are environment variable names and values are macOS Keychain account identifiers (stored under service "pi-armory").
-
-- At execution time, secrets are fetched from keychain and injected as environment variables
-- Secret values are redacted from all tool output (both streamed updates and final result)
-- `/armory secrets` opens a select menu to manage stored keychain entries (account list → status/action menu for set/update or delete). Setting or updating a value is collected by a local macOS `osascript` hidden-answer dialog (native, not a Pi dialog), so the secret value itself never traverses Pi's UI layer or transcript. That value is then passed to `security add-generic-password -w <value>` as a transient local process argument, so it may briefly be visible to local process inspection (e.g. `ps`) during that call
-- Secrets and `/armory secrets` are macOS-only: they depend on the macOS Keychain (`security`) and a local `osascript` hidden-answer dialog, which requires a GUI session (a logged-in macOS desktop able to display dialogs). There is no cross-platform fallback
-- If a secret is missing from keychain at execution time, the fetch throws an error
+Armory has no secret store and no `/armory secrets` UI. For credentials, point a `command` binding at whatever the credential's own provider or CLI offers for reading it back out — for example `gh auth token` for GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored in the macOS Keychain yourself. Users manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
 1. Agent calls `request_tool` with `{ command, reasoning, context? }`
    - If the TUI is unavailable, the request is rejected before drafting or persistence
@@ -265,13 +274,14 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 2. If a draft model is configured, it produces a full tool definition from the input
    - If the model lacks sufficient context (e.g., script contents not provided), it rejects with a reason
    - The agent receives `"Draft rejected: <reason>"` and can retry with more context
-3. Tool name is auto-normalized (lowercased; spaces/dashes become underscores; non `[a-z0-9_]` characters stripped; leading digits/underscores stripped so the result starts with a letter; e.g., "Run Tests" → `run_tests`). `request_tool` is a reserved name and is rejected if used
+3. Tool name is auto-normalized (lowercased; spaces/dashes become underscores; non `[a-z0-9_]` characters stripped; leading digits/underscores stripped so the result starts with a letter; e.g., "Run Tests" → `run_tests`). `request_tool` is a reserved name and is rejected if used. A normalized name colliding with an existing session tool or a persisted tool in the chosen destination fails as a tool execution error without overwriting it, not as a reserved-name notification
 4. A single TUI-native tool form is shown where the human can:
    - Review the complete proposed definition at once
    - Navigate and edit fields inline
    - Add or remove guidelines
    - Toggle `requires_approval`
    - Choose destination: session (default), project-local, or global
+   - Select Env sets by name from the chosen project/global config (none for session)
    - Request an AI re-draft without leaving the form
    - Approve or reject (with optional reason)
 5. On approve, the tool is registered and available next turn
@@ -296,6 +306,7 @@ Tools can reference secrets via `secrets: Record<string, string>` where keys are
 
 - stdout and stderr are merged into a single stream (same as `bash`)
 - Streamed to agent via `onUpdate` with throttling
+- If any active `secret: true` binding resolved to a nonempty value, `onUpdate` streaming is suppressed entirely for the invocation; only the final, fully redacted output is returned
 - Non-zero exit code: throw an Error with output + exit code (agent sees it as a tool failure)
 - Zero exit code: return combined output as text content (stderr included — not an error)
 - No truncation limits or timeouts initially
@@ -308,7 +319,7 @@ Human-initiated flow to revise existing tools, with optional AI assistance.
 
 1. `/armory edit [name]` — if name omitted, show a select list of all registered tools (session, project, global)
 2. Load the tool's current definition using session > project > global precedence
-3. Open the same TUI-native tool-review form used by `request_tool`, pre-populated with current values
+3. Open the same TUI-native tool-review form used by `request_tool`, pre-populated with current values, including selected Env sets
 4. Human edits fields directly, or navigates to the Re-draft field and presses Enter to invoke AI re-draft
 5. The edited name is normalized and validated using the same rules as `request_tool` (`normalizeName`, `VALID_NAME`, `RESERVED_NAMES`): if the result is empty, has no letter, or is a reserved name (`request_tool`), a notification explains the problem and the edit aborts before any persistence or registry mutation
 6. If the destination changed, show a confirmation describing the persistence/scope consequence
@@ -357,10 +368,12 @@ The revision system prompt is detailed: it describes current definition, optiona
 When editing an existing tool:
 - Default destination = where the tool was loaded from (session, project, or global)
 - If the user toggles destination, require confirmation before applying changes
+- Before saving, validate selected Env set names against the selected destination and reject unresolved destination changes as described above; a move to session requires the user to clear any selected sets in the form. On failure, notify the user and make no changes. The write-back steps below apply only after valid selection and scope checks.
 - If moving from session → project/global, write to the chosen config and remove from the session registry
 - If moving from project/global → session, remove from the source config and keep the tool only in the session registry
 - If moving from global → project, write to project config and remove from global config — other projects lose access to this tool
 - If moving from project → global, remove from project config to avoid shadowing
+- Project/global moves and renames use a create-only destination save followed by guarded source removal. If removal fails, best-effort rollback removes the newly saved destination; if rollback also fails, warn that manual reconciliation is needed. Two-file moves are not fully atomic under concurrent external writes.
 - If renaming/removing a higher-precedence tool reveals a lower-precedence persisted tool with the old name, re-register the revealed tool instead of deactivating the name
 
 ## Deleting tools (`/armory delete`)

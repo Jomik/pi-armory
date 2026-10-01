@@ -1,7 +1,13 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ArmoryTool, ToolSource } from "./config.js";
-import { loadToolsWithSource, loadToolWithSource, removeFromConfig, saveConfig } from "./config.js";
-import { addSecret, listSecrets, promptHiddenAnswer, removeSecret } from "./keychain.js";
+import {
+  getDestinationEnvSets,
+  loadToolInDestination,
+  loadToolsWithSource,
+  loadToolWithSource,
+  removeFromConfig,
+  saveConfig,
+} from "./config.js";
 import { handleOnboard } from "./onboard.js";
 import { approvalRegistry, registerArmoryTool, sessionRegistry, toolRegistry } from "./register-tool.js";
 import { normalizeName, RESERVED_NAMES, VALID_NAME } from "./request-tool.js";
@@ -15,10 +21,9 @@ export interface ArmoryCommandDeps {
 
 export function registerArmoryCommand(pi: ExtensionAPI, deps: ArmoryCommandDeps): void {
   pi.registerCommand("armory", {
-    description: "Manage armory: /armory secrets | /armory edit [name] | /armory delete [name] | /armory onboard",
+    description: "Manage armory: /armory edit [name] | /armory delete [name] | /armory onboard",
     getArgumentCompletions(prefix) {
       const items = [
-        { value: "secrets", label: "secrets", description: "Manage keychain secrets" },
         { value: "edit", label: "edit", description: "Edit an existing tool" },
         { value: "delete", label: "delete", description: "Delete a tool" },
         { value: "onboard", label: "onboard", description: "Bootstrap project tools with AI assistance" },
@@ -56,29 +61,13 @@ export function registerArmoryCommand(pi: ExtensionAPI, deps: ArmoryCommandDeps)
       } else if (sub === "delete" || sub.startsWith("delete ")) {
         const toolName = trimmed.slice(6).trim() || undefined;
         await handleDelete(pi, ctx, deps, toolName);
-      } else if (sub === "secrets") {
-        await handleSecrets(ctx, deps.tools);
       } else if (sub === "onboard") {
         await handleOnboard(pi, ctx, deps.projectRoot, deps.draftModelName);
       } else {
-        ctx.ui.notify(`Unknown: ${sub}. Available: secrets, edit, delete, onboard`, "error");
+        ctx.ui.notify(`Unknown: ${sub}. Available: edit, delete, onboard`, "error");
       }
     },
   });
-}
-
-type Ctx = Pick<ExtensionCommandContext, "ui">;
-
-function getAccounts(tools: ArmoryTool[]): string[] {
-  const accounts = new Set<string>();
-  for (const tool of tools) {
-    if (tool.secrets) {
-      for (const account of Object.values(tool.secrets)) {
-        accounts.add(account);
-      }
-    }
-  }
-  return [...accounts].sort();
 }
 
 /** Combined view of persisted tools (deps.tools) and in-memory session tools. */
@@ -122,7 +111,7 @@ async function restorePersistedToolIfAny(
 ): Promise<boolean> {
   const found = await loadToolWithSource(name, projectRoot);
   if (!found) return false;
-  registerArmoryTool(pi, found.tool);
+  registerArmoryTool(pi, found.tool, await getDestinationEnvSets(found.source, projectRoot));
   syncToolCondition(pi, cwd, found.tool);
   return true;
 }
@@ -133,11 +122,13 @@ async function deactivateToolUnlessPersisted(
   projectRoot: string,
   cwd: string,
 ): Promise<void> {
-  const restored = await restorePersistedToolIfAny(pi, name, projectRoot, cwd);
-  if (restored) return;
-  toolRegistry.delete(name);
+  // Fail closed before any fallible restore lookup: a stale handler must not remain active
+  // after its approval gate is removed.
   const active = pi.getActiveTools().filter((activeName) => activeName !== name);
   pi.setActiveTools(active);
+  toolRegistry.delete(name);
+  approvalRegistry.delete(name);
+  await restorePersistedToolIfAny(pi, name, projectRoot, cwd);
 }
 
 /** Human-readable confirmation copy for scope changes. */
@@ -179,81 +170,6 @@ function scopeChangeMessage(name: string, from: ToolSource, to: ToolSource): str
     );
   }
   return `Change destination for '${name}' from ${from} to ${to}?`;
-}
-
-function secretStatusTitle(accounts: string[], found: Set<string>): string {
-  const lines: string[] = ["Armory Secrets", ""];
-  for (const account of accounts) {
-    const status = found.has(account) ? "✓ found" : "✗ missing";
-    lines.push(`${account} — ${status}`);
-  }
-  return lines.join("\n");
-}
-
-async function handleSetSecret(ctx: Ctx, account: string): Promise<void> {
-  let value: string | null;
-  try {
-    value = await promptHiddenAnswer(account);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    ctx.ui.notify(msg, "error");
-    return;
-  }
-  if (value === null) return; // user cancelled
-  const trimmed = value.trim();
-  if (!trimmed) return; // empty/whitespace value is not saved
-
-  try {
-    await addSecret(account, trimmed);
-    ctx.ui.notify(`Secret '${account}' saved.`, "info");
-  } catch {
-    ctx.ui.notify(`Failed to save secret '${account}'.`, "error");
-  }
-}
-
-async function handleDeleteSecret(ctx: Ctx, account: string): Promise<void> {
-  const choice = await ctx.ui.select(`Delete '${account}'?`, ["Delete", "Cancel"]);
-  if (choice !== "Delete") return;
-
-  try {
-    await removeSecret(account);
-    ctx.ui.notify(`Secret '${account}' deleted.`, "info");
-  } catch {
-    ctx.ui.notify(`Failed to delete secret '${account}'.`, "error");
-  }
-}
-
-async function handleSecrets(ctx: Ctx, tools: ArmoryTool[]): Promise<void> {
-  const accounts = getAccounts(tools);
-  if (accounts.length === 0) {
-    ctx.ui.notify("No secrets configured", "info");
-    return;
-  }
-
-  for (;;) {
-    const { found } = await listSecrets(accounts);
-    const foundSet = new Set(found);
-    const choice = await ctx.ui.select(secretStatusTitle(accounts, foundSet), [...accounts, "Close"]);
-    if (choice === "Close") return;
-    // Fail closed on any response that isn't a configured account: never proceed to the
-    // next prompt or a keychain operation on an unexpected/malformed answer.
-    if (!choice || !accounts.includes(choice)) return;
-
-    const account = choice;
-    const isFound = foundSet.has(account);
-    const options = isFound ? ["Set/update", "Delete", "Back"] : ["Set/update", "Back"];
-    const action = await ctx.ui.select(`${account} — ${isFound ? "found" : "missing"}`, options);
-    // Fail closed unless the response is exactly one of the options actually offered.
-    // In particular, "Delete" must never execute when it wasn't offered (missing account).
-    if (!action || !options.includes(action)) return;
-    if (action === "Back") continue;
-
-    if (action === "Set/update") {
-      await handleSetSecret(ctx, account);
-    } else if (action === "Delete") {
-      await handleDeleteSecret(ctx, account);
-    }
-  }
 }
 
 async function pickEditableTool(
@@ -301,6 +217,20 @@ async function handleEdit(
 
   const { tool, source } = found;
 
+  // Load each scope independently: an invalid unrelated config must not hide the valid scope.
+  const envSets: Partial<Record<"project" | "global", Awaited<ReturnType<typeof getDestinationEnvSets>>>> = {};
+  for (const scope of ["project", "global"] as const) {
+    try {
+      envSets[scope] = await getDestinationEnvSets(scope, deps.projectRoot);
+    } catch {
+      // The unavailable scope cannot be selected for persistence below.
+    }
+  }
+  if (source !== "session" && !envSets[source]) {
+    ctx.ui.notify("Could not load environment sets for this tool's config. Fix the config and retry.", "error");
+    return;
+  }
+
   const result = await showToolEditor(
     ctx,
     {
@@ -312,6 +242,8 @@ async function handleEdit(
       requiresApproval: tool.requires_approval ?? false,
       destination: source,
       when: tool.when,
+      envFrom: tool.envFrom,
+      envSets,
     },
     deps.draftModelName,
   );
@@ -335,6 +267,14 @@ async function handleEdit(
     return;
   }
 
+  if (name !== tool.name && sessionRegistry.has(name)) {
+    ctx.ui.notify(
+      `Tool '${name}' already exists in this session. Rename it or remove the existing tool and retry.`,
+      "error",
+    );
+    return;
+  }
+
   // Confirm if scope/destination is being changed
   if (result.destination !== source) {
     const msg = scopeChangeMessage(tool.name, source, result.destination);
@@ -342,9 +282,34 @@ async function handleEdit(
     if (choice !== "Confirm") return; // user aborted — no changes applied
   }
 
-  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, secrets: tool.secrets });
+  const selectedEnvFrom = result.envFrom ?? tool.envFrom ?? [];
+  const destinationEnvSets = result.destination === "session" ? undefined : envSets[result.destination];
+  if (
+    (result.destination === "session" && selectedEnvFrom.length > 0) ||
+    (result.destination !== "session" &&
+      (!destinationEnvSets || selectedEnvFrom.some((setName) => !Object.hasOwn(destinationEnvSets, setName))))
+  ) {
+    ctx.ui.notify(
+      "Environment set selection is unavailable for this destination. Review the config and retry.",
+      "error",
+    );
+    return;
+  }
+
+  // A move must not write its destination if its source has become invalid since the form opened.
+  if (source !== "session" && source !== result.destination) {
+    try {
+      await getDestinationEnvSets(source, deps.projectRoot);
+    } catch {
+      ctx.ui.notify("Could not load the source config. Fix the config and retry.", "error");
+      return;
+    }
+  }
+
+  const updatedTool = buildToolFromResult({ ...result, name }, { env: tool.env, envFrom: tool.envFrom });
   const sourceName = tool.name;
   const destName = updatedTool.name;
+  let savedEnvSets = destinationEnvSets;
 
   // Apply changes based on source/destination combination
   if (source === "session" && result.destination === "session") {
@@ -354,7 +319,27 @@ async function handleEdit(
   } else if (source === "session" && result.destination !== "session") {
     // Session → project/global: persist and remove from session. If the session tool
     // shadowed a persisted tool and was renamed, leave the shadowed tool intact.
-    await saveConfig(updatedTool, result.destination as "project" | "global", deps.projectRoot);
+    try {
+      const existing = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+      if (existing) {
+        ctx.ui.notify(
+          `Tool '${destName}' already exists in the destination config. Rename it or remove the existing tool and retry.`,
+          "error",
+        );
+        return;
+      }
+      savedEnvSets = await saveConfig(
+        updatedTool,
+        result.destination,
+        deps.projectRoot,
+        undefined,
+        destinationEnvSets,
+        true,
+      );
+    } catch {
+      ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
+      return;
+    }
     sessionRegistry.delete(sourceName);
     const replacedName = destName === sourceName ? sourceName : destName;
     const idx = deps.tools.findIndex((t) => t.name === replacedName);
@@ -362,16 +347,52 @@ async function handleEdit(
     deps.tools.push(updatedTool);
   } else if (source !== "session" && result.destination === "session") {
     // Project/global → session: remove from config and keep in-memory only
-    await removeFromConfig(sourceName, source as "project" | "global", deps.projectRoot);
+    try {
+      await removeFromConfig(sourceName, source, deps.projectRoot, undefined, tool);
+    } catch {
+      ctx.ui.notify("Could not remove tool from source config. Fix the config and retry.", "error");
+      return;
+    }
     sessionRegistry.set(destName, updatedTool);
     // Remove from persisted tool list
     const idx = deps.tools.findIndex((t) => t.name === sourceName);
     if (idx !== -1) deps.tools.splice(idx, 1);
-  } else {
+  } else if (source !== "session" && result.destination !== "session") {
     // Project/global → project/global: persist (may move between locations)
-    await saveConfig(updatedTool, result.destination as "project" | "global", deps.projectRoot);
-    if (result.destination !== source || destName !== sourceName) {
-      await removeFromConfig(sourceName, source as "project" | "global", deps.projectRoot);
+    const needsRemoval = result.destination !== source || destName !== sourceName;
+    try {
+      if (needsRemoval) {
+        const existing = await loadToolInDestination(destName, result.destination, deps.projectRoot);
+        if (existing) {
+          ctx.ui.notify(
+            `Tool '${destName}' already exists in the destination config. Rename it or remove the existing tool and retry.`,
+            "error",
+          );
+          return;
+        }
+      }
+      savedEnvSets = needsRemoval
+        ? await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets, true)
+        : await saveConfig(updatedTool, result.destination, deps.projectRoot, undefined, destinationEnvSets);
+    } catch {
+      ctx.ui.notify("Could not save tool: config or environment sets changed. Review the config and retry.", "error");
+      return;
+    }
+    if (needsRemoval) {
+      try {
+        await removeFromConfig(sourceName, source, deps.projectRoot, undefined, tool);
+      } catch {
+        try {
+          await removeFromConfig(destName, result.destination, deps.projectRoot, undefined, updatedTool);
+          ctx.ui.notify("Could not remove tool from source config. Review the config and retry.", "error");
+        } catch {
+          ctx.ui.notify(
+            "Could not remove tool from source config; configs may be partially changed. Reconcile them manually before retrying.",
+            "error",
+          );
+        }
+        return;
+      }
     }
     // Update persisted tool list
     const idx = deps.tools.findIndex((t) => t.name === sourceName);
@@ -379,17 +400,33 @@ async function handleEdit(
     deps.tools.push(updatedTool);
   }
 
-  approvalRegistry.delete(sourceName);
-  registerArmoryTool(pi, updatedTool);
+  if (destName === sourceName) approvalRegistry.delete(sourceName);
+  if (result.destination === "session") {
+    registerArmoryTool(pi, updatedTool);
+  } else {
+    registerArmoryTool(pi, updatedTool, savedEnvSets);
+  }
 
   // Deactivate old tool name on rename unless a lower-precedence persisted tool is revealed.
+  let restoreFailed = false;
   if (destName !== sourceName) {
-    await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot, ctx.cwd);
+    try {
+      await deactivateToolUnlessPersisted(pi, sourceName, deps.projectRoot, ctx.cwd);
+    } catch {
+      restoreFailed = true;
+    }
   }
 
   // Sync the (re)registered tool's active state with its condition for this workspace.
   syncToolCondition(pi, ctx.cwd, updatedTool);
 
+  if (restoreFailed) {
+    ctx.ui.notify(
+      `Tool '${updatedTool.name}' updated, but the shadowed previous name could not be restored. Inspect and fix the config.`,
+      "error",
+    );
+    return;
+  }
   ctx.ui.notify(`Tool '${updatedTool.name}' updated`, "info");
 }
 
@@ -440,14 +477,26 @@ async function handleDelete(
   if (source === "session") {
     sessionRegistry.delete(tool.name);
   } else {
-    await removeFromConfig(tool.name, source as "project" | "global", deps.projectRoot);
+    try {
+      await removeFromConfig(tool.name, source, deps.projectRoot, undefined, tool);
+    } catch {
+      ctx.ui.notify("Could not remove tool from source config. Review the config and retry.", "error");
+      return;
+    }
     const idx = deps.tools.findIndex((t) => t.name === tool.name);
     if (idx !== -1) deps.tools.splice(idx, 1);
   }
 
-  // Clean up approval registry and deactivate unless a lower-precedence persisted tool is revealed.
-  approvalRegistry.delete(tool.name);
-  await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
+  // Deactivate before attempting to reveal a lower-precedence persisted tool.
+  try {
+    await deactivateToolUnlessPersisted(pi, tool.name, deps.projectRoot, ctx.cwd);
+  } catch {
+    ctx.ui.notify(
+      `Tool '${tool.name}' deleted, but the shadowed previous name could not be restored. Inspect and fix the config.`,
+      "error",
+    );
+    return;
+  }
 
   ctx.ui.notify(`Tool '${tool.name}' deleted`, "info");
 }

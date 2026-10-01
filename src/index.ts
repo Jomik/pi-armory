@@ -16,7 +16,7 @@ import { registerRequestTool } from "./request-tool.js";
 
 const factory: ExtensionFactory = async (pi) => {
   const projectRoot = process.cwd();
-  const { tools, draftModel, disableBash } = await loadConfig(projectRoot);
+  const { tools, envSetsByTool, draftModel, disableBash } = await loadConfig(projectRoot);
 
   pi.on("session_start", async (_event, ctx) => {
     let active = pi.getActiveTools();
@@ -48,7 +48,7 @@ const factory: ExtensionFactory = async (pi) => {
   });
 
   for (const tool of tools) {
-    registerArmoryTool(pi, tool);
+    registerArmoryTool(pi, tool, envSetsByTool?.[tool.name]);
   }
 
   // Approval gate via tool_call event — preflighted sequentially by pi,
