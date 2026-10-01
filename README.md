@@ -14,7 +14,7 @@ Or try it without installing:
 pi -e npm:pi-armory
 ```
 
-Requires `@earendil-works/pi` (and the `pi-ai`, `pi-coding-agent`, `pi-tui` packages) version `0.85.1` or later. Interactive request/review/approval workflows require Pi's TUI mode and are not supported in RPC clients.
+Requires `@earendil-works/pi` (and the `pi-ai`, `pi-coding-agent`, `pi-tui` packages) version `0.99.1` or later. Interactive request/review/approval workflows require Pi's TUI mode and are not supported in RPC clients.
 
 ## Design
 
@@ -99,7 +99,7 @@ Conditions are re-evaluated when a session starts and applied immediately whenev
 
 ### Bootstrapping
 
-Even with no config files, `request_tool` is always available. The agent can propose new tools and the human approves them via the single Pi TUI custom form (inline field editing, guidelines, approval toggle, destination, re-draft, approve/reject). This requires Pi's TUI mode and is not supported in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.
+Even with no config files, `request_tool` is available as a direct model tool (`exposure: "model-only"`), not callable from native codemode scripts. The agent can propose new tools and the human approves them via the single Pi TUI custom form (inline field editing, guidelines, approval toggle, destination, re-draft, approve/reject). This requires Pi's TUI mode and is not supported in RPC clients such as Paseo. Only one `request_tool` call may be in flight at a time; concurrent calls are blocked with a message telling the agent to call it one at a time.
 
 ```
 Agent calls: request_tool({
@@ -126,7 +126,7 @@ Tool names are automatically normalized: lowercased, spaces/dashes collapsed to 
 
 ### Approval gate
 
-Tools with `requires_approval: true` prompt the human for confirmation before each execution. The agent sees whether execution was approved or rejected.
+Tools with `requires_approval: true` prompt the human for confirmation before each execution. They register with `executionMode: "sequential"` so Pi serializes approval and execution, including calls from native codemode scripts. Tools with absent or false `requires_approval` keep Pi's default execution mode; re-registering a tool without approval removes the sequential override. The agent sees whether execution was approved or rejected.
 
 The review prompt is a structured TUI approval panel showing the command template and its parameters. Actions:
 

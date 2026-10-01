@@ -24,6 +24,7 @@ export function normalizeName(name: string): string {
 export function registerRequestTool(pi: ExtensionAPI, projectRoot: string, draftModelName?: string): void {
   pi.registerTool({
     name: "request_tool",
+    exposure: "model-only",
     label: "Request Tool",
     description:
       "Request a new armory tool to be registered. Presents a form for the user to review, edit, and approve the proposed tool before it is added to the armory.",

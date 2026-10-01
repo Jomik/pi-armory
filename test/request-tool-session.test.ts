@@ -42,6 +42,7 @@ describe("request_tool session destination", () => {
     registerRequestTool(pi as never, "/project");
 
     expect(requestTool).toBeDefined();
+    expect(pi.registerTool.mock.calls[0][0].exposure).toBe("model-only");
 
     const ctx = {
       hasUI: true,
