@@ -59,7 +59,7 @@ The condition set is intentionally closed. Arbitrary shell predicates, named con
 
 - Tools are shell commands with optional `{{param}}` template parameters
 - Stored in `.pi/armory.json` (project) or `~/.pi/agent/armory.json` (global)
-- Agent requests new tools via `request_tool` — human reviews and approves
+- Agent requests new tools via `request_tool` — human reviews and approves; `exposure: "model-only"` keeps creation directly model-callable but excludes it from native codemode scripts
 - `requires_approval: true` prompts human yes/no before each execution
 - Tools registered at session start from config
 - Newly approved tools are available next turn
@@ -122,7 +122,7 @@ Defaults and safety policy for candidates are advisory only; final control remai
 - `envSets` are scoped to their defining config: global tools may use only global sets, project tools only project sets, and session tools cannot reference `envSets`. Sets do not merge across files, even when a project tool overrides a global tool.
 - Unknown or repeated names in a tool's `envFrom`, duplicate tool names within one file, and duplicate env variable keys across selected sets and inline `env` invalidate the entire defining config with a warning, consistent with existing all-or-nothing config loading; none are silently shadowed.
 - `draftModel` follows the same override: project value wins over global
-- If no config exists, no tools are registered — but `request_tool` is always available so the agent can bootstrap
+- If no config exists, no command tools are registered — but `request_tool` remains available directly to the model (not to native codemode scripts) so the agent can bootstrap
 
 ## Parameters
 
@@ -265,7 +265,7 @@ Legacy `secrets` invalidates the entire config; old `$VAR`/`$$` strings are used
 
 Armory has no secret store and no `/armory secrets` UI. For credentials, point a `command` binding at whatever the credential's own provider or CLI offers for reading it back out — for example `gh auth token` for GitHub CLI, or `security find-generic-password -s pi-armory -a api-token -w` for a value you've stored in the macOS Keychain yourself. Users manage the underlying credential (login, rotation, revocation) through that provider or CLI; Armory only resolves and redacts the value at execution time.
 
-1. Agent calls `request_tool` with `{ command, reasoning, context? }`
+1. Agent calls `request_tool` directly with `{ command, reasoning, context? }`; it is registered with `exposure: "model-only"` and cannot be called from native codemode scripts
    - If the TUI is unavailable, the request is rejected before drafting or persistence
    - Only one `request_tool` call may be in flight at a time; a concurrent call is blocked with a message asking the agent to call it one at a time (enforced by the extension's `tool_call`/`tool_execution_end` handlers)
    - `command`: the shell command or script path
@@ -291,7 +291,9 @@ Armory has no secret store and no `/armory secrets` UI. For credentials, point a
 
 ## `requires_approval` execution flow
 
-1. Agent calls a tool that has `requires_approval: true`
+Approval tools register with `executionMode: "sequential"`. Pi serializes their approval and execution with other tool calls, including native codemode calls; serialization is not an assumed property of `tool_call` preflight. The approval gate remains in the extension's `tool_call` handler. Tools with false or absent `requires_approval` omit the execution mode override, including when re-registering a previously approval-gated tool.
+
+1. Agent calls a tool that has `requires_approval: true`, directly or from a native codemode script
 2. If the TUI is unavailable, the call is blocked immediately with a rejection message
 3. Otherwise, an approval prompt displays the command template (not fully interpolated) alongside the structured parameters for the current values. Edit is offered only when the command has parameters
 4. The review loop repeats until the human explicitly runs or rejects:

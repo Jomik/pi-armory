@@ -242,6 +242,7 @@ export function registerArmoryTool(pi: ExtensionAPI, tool: ArmoryTool, envSets: 
 
   pi.registerTool({
     name: tool.name,
+    ...(tool.requires_approval ? { executionMode: "sequential" as const } : {}),
     label: tool.name,
     description: tool.description,
     promptSnippet: `Runs the command \`${tool.command}\``,

@@ -74,6 +74,23 @@ describe("registerArmoryTool", () => {
     expect(def.description).toBe("A test tool");
   });
 
+  it("registers approval tools for sequential execution", () => {
+    const registerTool = vi.fn();
+    registerArmoryTool({ registerTool } as unknown as ExtensionAPI, approvalTool);
+
+    expect(registerTool.mock.calls[0][0].executionMode).toBe("sequential");
+  });
+
+  it.each([undefined, false])("leaves execution mode unset when requires_approval is %s", (requiresApproval) => {
+    const registerTool = vi.fn();
+    registerArmoryTool({ registerTool } as unknown as ExtensionAPI, {
+      ...baseTool,
+      ...(requiresApproval === undefined ? {} : { requires_approval: requiresApproval }),
+    });
+
+    expect(registerTool.mock.calls[0][0]).not.toHaveProperty("executionMode");
+  });
+
   it("tells agents to call approval tools directly", () => {
     const registerTool = vi.fn();
     registerArmoryTool({ registerTool } as unknown as ExtensionAPI, { ...approvalTool, guidelines: ["Use caution"] });
@@ -142,16 +159,21 @@ describe("registerArmoryTool", () => {
     expect(result.content[0].text).toBe("done");
   });
 
-  it("clears stale approval entries when re-registering a non-approval tool", () => {
-    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, approvalTool);
+  it.each([undefined, false])("resets approval and execution mode on re-registration with %s", (requiresApproval) => {
+    const registerTool = vi.fn();
+    const pi = { registerTool } as unknown as ExtensionAPI;
+    registerArmoryTool(pi, approvalTool);
     expect(approvalRegistry.has("approval-tool")).toBe(true);
+    expect(registerTool.mock.calls[0][0].executionMode).toBe("sequential");
 
-    registerArmoryTool({ registerTool: vi.fn() } as unknown as ExtensionAPI, {
-      ...approvalTool,
-      requires_approval: false,
+    registerArmoryTool(pi, {
+      ...baseTool,
+      name: approvalTool.name,
+      ...(requiresApproval === undefined ? {} : { requires_approval: requiresApproval }),
     });
 
     expect(approvalRegistry.has("approval-tool")).toBe(false);
+    expect(registerTool.mock.calls[1][0]).not.toHaveProperty("executionMode");
   });
 
   it("tracks the latest effective definition for a tool name in toolRegistry", () => {

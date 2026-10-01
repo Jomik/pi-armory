@@ -51,8 +51,8 @@ const factory: ExtensionFactory = async (pi) => {
     registerArmoryTool(pi, tool, envSetsByTool?.[tool.name]);
   }
 
-  // Approval gate via tool_call event — preflighted sequentially by pi,
-  // so concurrent tool calls with requires_approval serialize naturally.
+  // Approval gate via tool_call event. Approval tools register with executionMode: "sequential"
+  // so Pi serializes their approval and execution, including native codemode calls.
   // Uses approvalRegistry which is updated by registerArmoryTool (including runtime registrations).
   // Also blocks parallel request_tool calls (only one form at a time).
   let requestToolInFlight = false;
